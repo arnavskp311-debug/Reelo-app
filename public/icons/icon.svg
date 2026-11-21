@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" rx="112" fill="#090A0F" />
+  <circle cx="256" cy="256" r="236" fill="none" stroke="#1E2235" stroke-width="8" />
+  
+  <!-- Outer Aperture Ring -->
+  <circle cx="256" cy="256" r="148" fill="none" stroke="#2563EB" stroke-width="24" stroke-dasharray="140 30 180 25" />
+  
+  <!-- Inner Dynamic Shutter / Monogram 'R' Blade -->
+  <path d="M192 144 L192 368 M192 144 L296 144 C340 144 368 172 368 216 C368 260 340 288 296 288 L192 288 M272 288 L360 368" 
+        fill="none" 
+        stroke="#FFFFFF" 
+        stroke-width="32" 
+        stroke-linecap="round" 
+        stroke-linejoin="round" />
+  
+  <!-- Electric Azure Accent Dot -->
+  <circle cx="368" cy="216" r="18" fill="#3B82F6" />
+</svg>
