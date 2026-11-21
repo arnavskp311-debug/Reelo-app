@@ -1,69 +1,55 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function POST(
-  req: NextRequest,
+  request: NextRequest,
   { params }: { params: { username: string } }
 ) {
   try {
-    const { username } = params;
-    const db = getDb();
-    const followerId = DEMO_CURRENT_USER.id;
+    const supabase = createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    // Find target user by username
-    const target = db.prepare('SELECT id FROM profiles WHERE username = ? COLLATE NOCASE').get(username) as any;
-    if (!target) {
-      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
-    const followingId = target.id;
-    if (followerId === followingId) {
+    const targetUsername = params.username.toLowerCase().trim();
+
+    const { data: targetProfile } = await supabase
+      .from('profiles')
+      .select('id, followers_count')
+      .eq('username', targetUsername)
+      .maybeSingle();
+
+    if (!targetProfile || !(targetProfile as any).id) {
+      return NextResponse.json({ error: 'Target user not found' }, { status: 404 });
+    }
+
+    const targetId = (targetProfile as any).id;
+
+    if (targetId === user.id) {
       return NextResponse.json({ error: 'Cannot follow yourself' }, { status: 400 });
     }
 
-    // Check existing follow
-    const existing = db.prepare('SELECT id FROM follows WHERE follower_id = ? AND following_id = ?').get(followerId, followingId);
+    const { data: existingFollow } = await supabase
+      .from('follows')
+      .select('id')
+      .eq('follower_id', user.id)
+      .eq('following_id', targetId)
+      .maybeSingle();
 
-    if (existing) {
-      // Unfollow
-      db.prepare('DELETE FROM follows WHERE follower_id = ? AND following_id = ?').run(followerId, followingId);
-      db.prepare('UPDATE profiles SET following_count = MAX(0, following_count - 1) WHERE id = ?').run(followerId);
-      db.prepare('UPDATE profiles SET followers_count = MAX(0, followers_count - 1) WHERE id = ?').run(followingId);
-
-      return NextResponse.json({
-        following: false,
-        message: `Unfollowed @${username}`,
-      });
+    if (existingFollow && (existingFollow as any).id) {
+      await supabase.from('follows').delete().eq('id', (existingFollow as any).id);
+      return NextResponse.json({ following: false });
     } else {
-      // Follow
-      const followId = `fol_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      const now = new Date().toISOString();
+      await supabase.from('follows').insert({
+        follower_id: user.id,
+        following_id: targetId,
+      } as any);
 
-      db.prepare('INSERT INTO follows (id, follower_id, following_id, created_at) VALUES (?, ?, ?, ?)').run(
-        followId,
-        followerId,
-        followingId,
-        now
-      );
-
-      db.prepare('UPDATE profiles SET following_count = following_count + 1 WHERE id = ?').run(followerId);
-      db.prepare('UPDATE profiles SET followers_count = followers_count + 1 WHERE id = ?').run(followingId);
-
-      // Create notification
-      const notifId = `notif_${Date.now()}`;
-      db.prepare(`
-        INSERT INTO notifications (id, user_id, actor_id, type, post_id, is_read, created_at)
-        VALUES (?, ?, ?, 'follow', NULL, 0, ?)
-      `).run(notifId, followingId, followerId, now);
-
-      return NextResponse.json({
-        following: true,
-        message: `Following @${username}`,
-      });
+      return NextResponse.json({ following: true });
     }
   } catch (error: any) {
-    console.error('Failed to toggle follow:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

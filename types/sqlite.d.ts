@@ -1,3 +1,7 @@
+/**
+ * @deprecated Legacy type definitions for node:sqlite.
+ * REELO uses Cloud Supabase as its primary data store.
+ */
 declare module 'node:sqlite' {
   export interface StatementSync {
     all(...params: any[]): any[];

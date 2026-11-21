@@ -42,38 +42,37 @@ Editorial typography, natural colors, subtle shadows, light mode default, WCAG A
 ## Technology
 
 - **Web:** Next.js 14 App Router, React 18, TypeScript (strict), Tailwind CSS
-- **Icons/motion:** Lucide React, Framer Motion (sparingly)
-- **Local dev backend:** Node 24 `node:sqlite` (`data/reelo.db`) — **development only**
-- **Production backend:** Supabase Auth + PostgreSQL + Storage + Realtime (RLS enabled)
-- **Planned mobile:** React Native + Expo, sharing the same backend contracts
-
-The app talks to a service layer; the backend adapter (`local` or `supabase`) can be swapped without rewriting the UI.
+- **Icons/motion:** Lucide React, Framer Motion
+- **Primary Data Store:** Cloud Supabase (Auth, PostgreSQL, Storage, Realtime) with Row Level Security (RLS)
+- **Local PC Storage:** **Strictly Decommissioned** — User data, posts, media, and account records are never stored locally on the PC
+- **Planned Mobile:** React Native + Expo, sharing the same Supabase backend contracts
 
 ---
 
 ## Quickstart
 
 ### 1. Install
-
 ```bash
 npm install
 ```
 
-### 2. Environment
-
+### 2. Configure Supabase Environment
+Copy `.env.example` to `.env.local`:
 ```bash
 cp .env.example .env.local
-# set BACKEND=local for credential-free development
+```
+Add your Supabase project credentials:
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://your-project-id.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 ```
 
-### 3. Initialize the local database
+### 3. Apply Supabase Database Migrations
+Execute the SQL migrations in `supabase/migrations/`:
+- `supabase/migrations/001_initial_schema.sql` (Profiles, Posts, Likes, Comments, Follows, Communities, Messages, Notifications, RLS & triggers)
+- `supabase/migrations/002_bookmarks_blocks_reports.sql` (Bookmarks, Blocks, Reports & RLS)
 
-```bash
-npm run init-db
-```
-
-### 4. Run
-
+### 4. Run Development Server
 ```bash
 npm run dev -- -H 0.0.0.0
 ```

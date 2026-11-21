@@ -1,14 +1,12 @@
 import { NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function POST() {
-  const response = NextResponse.json({ success: true, message: 'Signed out successfully.' });
-  // Clear session cookie
-  response.cookies.set('reelo_session', '', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 0,
-    path: '/',
-  });
-  return response;
+  try {
+    const supabase = createServerSupabaseClient();
+    await supabase.auth.signOut();
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message || 'Logout failed.' }, { status: 500 });
+  }
 }

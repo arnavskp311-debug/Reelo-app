@@ -1,23 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { Community } from '@/types';
+import { NextResponse } from 'next/server';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const db = getDb();
-    const rows = db
-      .prepare('SELECT * FROM communities ORDER BY members_count DESC')
-      .all() as any[];
+    const supabase = createServerSupabaseClient();
+    const { data: communities, error } = await supabase
+      .from('communities')
+      .select('*')
+      .order('members_count', { ascending: false });
 
-    const communities: Community[] = rows.map((r) => ({
-      ...r,
-      is_verified: Boolean(r.is_verified),
-    }));
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
-    return NextResponse.json({ communities });
+    return NextResponse.json({ communities: communities || [] });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

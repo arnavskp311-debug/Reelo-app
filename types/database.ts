@@ -297,6 +297,84 @@ export interface Database {
           created_at?: string;
         };
       };
+      bookmarks: {
+        Row: {
+          id: string;
+          user_id: string;
+          post_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          post_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          post_id?: string;
+          created_at?: string;
+        };
+      };
+      blocks: {
+        Row: {
+          id: string;
+          blocker_id: string;
+          blocked_id: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          blocker_id: string;
+          blocked_id: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          blocker_id?: string;
+          blocked_id?: string;
+          created_at?: string;
+        };
+      };
+      reports: {
+        Row: {
+          id: string;
+          reporter_id: string;
+          target_type: 'post' | 'user' | 'comment';
+          target_id: string;
+          reason: string;
+          details: string | null;
+          status: 'pending' | 'resolved' | 'dismissed';
+          resolved_at: string | null;
+          resolved_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          reporter_id: string;
+          target_type: 'post' | 'user' | 'comment';
+          target_id: string;
+          reason: string;
+          details?: string | null;
+          status?: 'pending' | 'resolved' | 'dismissed';
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          reporter_id?: string;
+          target_type?: 'post' | 'user' | 'comment';
+          target_id?: string;
+          reason?: string;
+          details?: string | null;
+          status?: 'pending' | 'resolved' | 'dismissed';
+          resolved_at?: string | null;
+          resolved_by?: string | null;
+          created_at?: string;
+        };
+      };
     };
   };
 }

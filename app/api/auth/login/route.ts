@@ -1,28 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
-import { Profile } from '@/types';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
-    const db = getDb();
+    const supabase = createServerSupabaseClient();
     const body = await request.json();
     const { email, password } = body;
 
-    // Check if profile exists matching username or default to current user
-    const userRow = db.prepare('SELECT * FROM profiles WHERE id = ?').get(DEMO_CURRENT_USER.id) as any;
-
-    if (!userRow) {
-      return NextResponse.json({ user: DEMO_CURRENT_USER });
+    if (!email || !password) {
+      return NextResponse.json({ error: 'Email and password are required.' }, { status: 400 });
     }
 
-    const user: Profile = {
-      ...userRow,
-      is_verified: Boolean(userRow.is_verified),
-    };
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
 
-    return NextResponse.json({ user, error: null });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 401 });
+    }
+
+    if (!data.user) {
+      return NextResponse.json({ error: 'User account not found.' }, { status: 404 });
+    }
+
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user.id)
+      .single();
+
+    return NextResponse.json({ user: profile || null, session: data.session });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error.' }, { status: 500 });
   }
 }

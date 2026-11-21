@@ -6,7 +6,7 @@
     "dev": "next dev -H 0.0.0.0",
     "build": "next build",
     "start": "next start",
-    "init-db": "node scripts/init-local-db.js",
+    "init-db:legacy": "node scripts/init-local-db.js",
     "lint": "next lint",
     "type-check": "tsc --noEmit"
   },

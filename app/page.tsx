@@ -112,8 +112,8 @@ export default function LandingPage() {
           </div>
           <div className="h-8 w-px bg-reelo-border hidden md:block" />
           <div>
-            <p className="text-2xl sm:text-3xl font-extrabold text-reelo-primary">Local SQLite DB</p>
-            <p className="text-xs text-reelo-muted">Embedded on your PC</p>
+            <p className="text-2xl sm:text-3xl font-extrabold text-reelo-primary">Cloud Supabase</p>
+            <p className="text-xs text-reelo-muted">PostgreSQL & Auth</p>
           </div>
           <div className="h-8 w-px bg-reelo-border hidden md:block" />
           <div>

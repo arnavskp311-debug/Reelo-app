@@ -1,3 +1,11 @@
+/**
+ * @deprecated
+ * LEGACY / UNUSED:
+ * REELO uses Cloud Supabase (Auth, PostgreSQL, Storage, Realtime) as its single source of truth.
+ * User data, posts, media, or accounts are NOT stored locally on the PC.
+ * This standalone script is kept strictly as an inactive legacy utility.
+ */
+
 const { DatabaseSync } = require('node:sqlite');
 const path = require('path');
 const fs = require('fs');

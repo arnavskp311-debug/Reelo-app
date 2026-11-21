@@ -1,189 +1,175 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { PostWithAuthor, Profile } from '@/types';
-import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { PostWithAuthor } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const db = getDb();
+    const supabase = createServerSupabaseClient();
     const { searchParams } = new URL(request.url);
     const filter = searchParams.get('filter') || 'for-you';
-    const currentUserId = DEMO_CURRENT_USER.id;
+    const limit = parseInt(searchParams.get('limit') || '30', 10);
 
-    let query = `
-      SELECT 
-        p.*,
-        u.id as author_id,
-        u.username as author_username,
-        u.full_name as author_full_name,
-        u.avatar_url as author_avatar_url,
-        u.banner_url as author_banner_url,
-        u.bio as author_bio,
-        u.website as author_website,
-        u.location as author_location,
-        u.is_verified as author_is_verified,
-        u.followers_count as author_followers_count,
-        u.following_count as author_following_count,
-        u.posts_count as author_posts_count,
-        u.created_at as author_created_at,
-        u.updated_at as author_updated_at,
-        (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id AND l.user_id = ?) as user_liked,
-        (SELECT COUNT(*) FROM bookmarks b WHERE b.post_id = p.id AND b.user_id = ?) as user_bookmarked
-      FROM posts p
-      JOIN profiles u ON p.user_id = u.id
-      WHERE p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ?)
-    `;
+    const { data: { user } } = await supabase.auth.getUser();
+
+    let blockedIds: string[] = [];
+    let followingIds: string[] = [];
+    let savedPostIds: string[] = [];
+    let userLikedIds = new Set<string>();
+    let userBookmarkedIds = new Set<string>();
+
+    if (user) {
+      const [blocksRes, followsRes, bookmarksRes, likesRes] = await Promise.all([
+        supabase.from('blocks').select('blocked_id').eq('blocker_id', user.id),
+        supabase.from('follows').select('following_id').eq('follower_id', user.id),
+        supabase.from('bookmarks').select('post_id').eq('user_id', user.id),
+        supabase.from('likes').select('post_id').eq('user_id', user.id),
+      ]);
+
+      if (blocksRes.data) blockedIds = blocksRes.data.map((b: any) => b.blocked_id);
+      if (followsRes.data) followingIds = followsRes.data.map((f: any) => f.following_id);
+      if (bookmarksRes.data) {
+        savedPostIds = bookmarksRes.data.map((b: any) => b.post_id);
+        userBookmarkedIds = new Set(savedPostIds);
+      }
+      if (likesRes.data) {
+        userLikedIds = new Set(likesRes.data.map((l: any) => l.post_id));
+      }
+    }
+
+    let query = supabase
+      .from('posts')
+      .select(`
+        *,
+        author:profiles!posts_user_id_fkey(*)
+      `)
+      .limit(limit);
+
+    if (blockedIds.length > 0) {
+      query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
+    }
 
     if (filter === 'reels') {
-      query += ` AND (p.media_type = 'reel' OR (p.media_urls != '[]' AND p.media_urls IS NOT NULL))`;
-    } else if (filter === 'saved') {
-      query += ` AND p.id IN (SELECT post_id FROM bookmarks WHERE user_id = ?)`;
-    } else if (filter === 'following') {
-      query += ` AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)`;
+      query = query.in('media_type', ['video', 'reel']);
+    } else if (filter === 'following' && user) {
+      if (followingIds.length > 0) {
+        query = query.in('user_id', followingIds);
+      } else {
+        return NextResponse.json({ posts: [] });
+      }
+    } else if (filter === 'saved' && user) {
+      if (savedPostIds.length > 0) {
+        query = query.in('id', savedPostIds);
+      } else {
+        return NextResponse.json({ posts: [] });
+      }
     }
 
     if (filter === 'trending') {
-      query += ` ORDER BY p.likes_count DESC, p.created_at DESC`;
+      query = query.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
     } else {
-      query += ` ORDER BY p.is_pinned DESC, p.created_at DESC`;
+      query = query.order('created_at', { ascending: false });
     }
 
-    let params: any[] = [currentUserId, currentUserId, currentUserId];
-    if (filter === 'saved' || filter === 'following') {
-      params.push(currentUserId);
+    const { data: postsData, error } = await query;
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
     }
 
-    const rows = db.prepare(query).all(...params) as any[];
-
-    const posts: PostWithAuthor[] = rows.map((row) => {
-      let mediaUrls: string[] = [];
-      let tags: string[] = [];
-
-      try {
-        mediaUrls = JSON.parse(row.media_urls || '[]');
-      } catch {}
-      try {
-        tags = JSON.parse(row.tags || '[]');
-      } catch {}
-
-      const author: Profile = {
-        id: row.author_id,
-        username: row.author_username,
-        full_name: row.author_full_name,
-        avatar_url: row.author_avatar_url,
-        banner_url: row.author_banner_url,
-        bio: row.author_bio,
-        website: row.author_website,
-        location: row.author_location,
-        is_verified: Boolean(row.author_is_verified),
-        followers_count: row.author_followers_count,
-        following_count: row.author_following_count,
-        posts_count: row.author_posts_count,
-        created_at: row.author_created_at,
-        updated_at: row.author_updated_at,
-      };
-
-      return {
-        id: row.id,
-        user_id: row.user_id,
-        author,
-        content: row.content,
-        media_urls: mediaUrls,
-        media_type: row.media_type,
-        likes_count: row.likes_count,
-        comments_count: row.comments_count,
-        reposts_count: row.reposts_count,
-        community_id: row.community_id,
-        tags,
-        is_pinned: Boolean(row.is_pinned),
-        user_has_liked: Boolean(row.user_liked),
-        user_has_bookmarked: Boolean(row.user_bookmarked),
-        created_at: row.created_at,
-        updated_at: row.updated_at,
-      };
-    });
+    const posts: PostWithAuthor[] = (postsData || []).map((post: any) => ({
+      id: post.id,
+      user_id: post.user_id,
+      content: post.content,
+      media_urls: post.media_urls || [],
+      media_type: post.media_type || 'none',
+      likes_count: post.likes_count || 0,
+      comments_count: post.comments_count || 0,
+      reposts_count: post.reposts_count || 0,
+      community_id: post.community_id || null,
+      tags: post.tags || [],
+      is_pinned: Boolean(post.is_pinned),
+      created_at: post.created_at,
+      updated_at: post.updated_at,
+      author: post.author || {
+        id: post.user_id,
+        username: 'creator',
+        full_name: 'REELO Member',
+        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${post.user_id}`,
+        is_verified: false,
+        followers_count: 0,
+        following_count: 0,
+        posts_count: 0,
+        created_at: post.created_at,
+        updated_at: post.created_at,
+      },
+      user_has_liked: userLikedIds.has(post.id),
+      user_has_bookmarked: userBookmarkedIds.has(post.id),
+    }));
 
     return NextResponse.json({ posts });
   } catch (error: any) {
-    console.error('Error fetching posts from local SQLite:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const db = getDb();
-    const body = await request.json();
-    const {
-      content,
-      mediaUrls = [],
-      mediaType = 'none',
-      tags = [],
-      communityId = null,
-      userId = DEMO_CURRENT_USER.id,
-    } = body;
+    const supabase = createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (!content || !content.trim()) {
-      return NextResponse.json({ error: 'Content is required.' }, { status: 400 });
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required to post.' }, { status: 401 });
     }
 
-    const postId = `post_${Date.now()}`;
-    const now = new Date().toISOString();
+    const body = await request.json();
+    const { content, mediaUrls, mediaType, tags, communityId } = body;
 
-    const insert = db.prepare(`
-      INSERT INTO posts (
-        id, user_id, content, media_urls, media_type, likes_count, comments_count,
-        reposts_count, community_id, tags, is_pinned, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?, 0, ?, ?)
-    `);
+    if (!content || typeof content !== 'string') {
+      return NextResponse.json({ error: 'Post content cannot be empty.' }, { status: 400 });
+    }
 
-    insert.run(
-      postId,
-      userId,
-      content,
-      JSON.stringify(mediaUrls),
-      mediaType,
-      communityId,
-      JSON.stringify(tags),
-      now,
-      now
-    );
-
-    // Increment profile posts_count
-    db.prepare('UPDATE profiles SET posts_count = posts_count + 1 WHERE id = ?').run(userId);
-
-    // Retrieve created post with author
-    const authorRow = db.prepare('SELECT * FROM profiles WHERE id = ?').get(userId) as any;
-    const author: Profile = {
-      ...authorRow,
-      is_verified: Boolean(authorRow.is_verified),
-    };
-
-    const newPost: PostWithAuthor = {
-      id: postId,
-      user_id: userId,
-      author,
-      content,
-      media_urls: mediaUrls,
-      media_type: mediaType,
+    const newPostPayload = {
+      user_id: user.id,
+      content: content.trim(),
+      media_urls: mediaUrls || [],
+      media_type: mediaType || 'none',
+      tags: tags || [],
+      community_id: communityId || null,
       likes_count: 0,
       comments_count: 0,
       reposts_count: 0,
-      community_id: communityId,
-      tags,
       is_pinned: false,
-      user_has_liked: false,
-      user_has_reposted: false,
-      user_has_bookmarked: false,
-      created_at: now,
-      updated_at: now,
     };
 
-    return NextResponse.json({ post: newPost });
+    const { data: newPost, error: insertError } = await supabase
+      .from('posts')
+      .insert(newPostPayload as any)
+      .select(`
+        *,
+        author:profiles!posts_user_id_fkey(*)
+      `)
+      .single();
+
+    if (insertError) {
+      return NextResponse.json({ error: insertError.message }, { status: 500 });
+    }
+
+    const postWithAuthor: PostWithAuthor = {
+      ...(newPost as any),
+      author: (newPost as any)?.author || {
+        id: user.id,
+        username: 'you',
+        full_name: 'You',
+        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
+      },
+      user_has_liked: false,
+      user_has_bookmarked: false,
+    };
+
+    return NextResponse.json({ post: postWithAuthor }, { status: 201 });
   } catch (error: any) {
-    console.error('Error creating post in local SQLite:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

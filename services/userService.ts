@@ -1,68 +1,102 @@
 import { Profile } from '@/types';
-import { DEMO_USERS, DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
+import { supabase } from '@/lib/supabase/client';
 
 export const userService = {
+  /**
+   * Retrieve a user profile from Supabase PostgreSQL by their unique username.
+   */
   async getProfileByUsername(username: string): Promise<Profile | null> {
-    if (typeof window !== 'undefined') {
-      try {
-        const res = await fetch(`/api/users/${username}`, { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.profile) return data.profile;
-        }
-      } catch (err) {
-        console.warn('Local user API fetch error:', err);
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('username', username.toLowerCase().trim())
+        .single();
+
+      if (error || !data) {
+        return null;
       }
-    }
 
-    if (username.toLowerCase() === DEMO_CURRENT_USER.username.toLowerCase()) {
-      return DEMO_CURRENT_USER;
+      return data as Profile;
+    } catch (err) {
+      console.error('Error fetching profile from Supabase:', err);
+      return null;
     }
-
-    const found = Object.values(DEMO_USERS).find(
-      (u) => u.username.toLowerCase() === username.toLowerCase()
-    );
-    return found || null;
   },
 
+  /**
+   * Update the profile of the currently authenticated Supabase user.
+   */
   async updateProfile(profileUpdates: Partial<Profile>): Promise<{ profile: Profile | null; error: string | null }> {
-    if (typeof window !== 'undefined') {
-      try {
-        const username = DEMO_CURRENT_USER.username;
-        const res = await fetch(`/api/users/${username}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(profileUpdates),
-        });
-        const data = await res.json();
-        if (res.ok && data.profile) {
-          return { profile: data.profile, error: null };
-        }
-        return { profile: null, error: data.error || 'Failed to update profile.' };
-      } catch (err: any) {
-        return { profile: null, error: err.message || 'Profile update failed.' };
-      }
-    }
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
 
-    const updated = { ...DEMO_CURRENT_USER, ...profileUpdates, updated_at: new Date().toISOString() };
-    return { profile: updated, error: null };
+      if (!user) {
+        return { profile: null, error: 'Authentication required to update profile.' };
+      }
+
+      const { data, error } = await (supabase
+        .from('profiles') as any)
+        .update({
+          ...profileUpdates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', user.id)
+        .select()
+        .single();
+
+      if (error) {
+        return { profile: null, error: error.message };
+      }
+
+      return { profile: data as Profile, error: null };
+    } catch (err: any) {
+      return { profile: null, error: err.message || 'Failed to update profile.' };
+    }
   },
 
-  async toggleFollow(username: string): Promise<{ following: boolean; error: string | null }> {
-    if (typeof window !== 'undefined') {
-      try {
-        const res = await fetch(`/api/users/${username}/follow`, {
-          method: 'POST',
-        });
-        const data = await res.json();
-        if (res.ok) {
-          return { following: data.following, error: null };
-        }
-        return { following: false, error: data.error || 'Failed to toggle follow' };
-      } catch (err: any) {
-        return { following: false, error: err.message || 'Follow request error' };
+  /**
+   * Toggle follow/unfollow status for a target user in Supabase.
+   */
+  async toggleFollow(targetUsername: string): Promise<{ following: boolean; error: string | null }> {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+
+      if (!user) {
+        return { following: false, error: 'Authentication required to follow users.' };
       }
+
+      const targetProfile = await this.getProfileByUsername(targetUsername);
+      if (!targetProfile) {
+        return { following: false, error: 'Target user not found.' };
+      }
+
+      const { data: existingFollow } = await supabase
+        .from('follows')
+        .select('id')
+        .eq('follower_id', user.id)
+        .eq('following_id', targetProfile.id)
+        .maybeSingle();
+
+      if (existingFollow && (existingFollow as any).id) {
+        await supabase
+          .from('follows')
+          .delete()
+          .eq('id', (existingFollow as any).id);
+
+        return { following: false, error: null };
+      } else {
+        await supabase
+          .from('follows')
+          .insert({
+            follower_id: user.id,
+            following_id: targetProfile.id,
+          } as any);
+
+        return { following: true, error: null };
+      }
+    } catch (err: any) {
+      return { following: false, error: err.message || 'Follow request failed.' };
     }
-    return { following: true, error: null };
   },
 };

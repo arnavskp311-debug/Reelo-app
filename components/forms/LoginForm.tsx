@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Mail, Lock, ArrowRight, UserCheck } from 'lucide-react';
+import { Mail, Lock, ArrowRight } from 'lucide-react';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { authService } from '@/services/authService';
@@ -34,12 +34,6 @@ export function LoginForm() {
     }
   };
 
-  const handleInstantDemoLogin = async () => {
-    setLoading(true);
-    await authService.signIn('alex@reelo.io', 'demo123456');
-    router.push('/home');
-  };
-
   return (
     <div className="w-full max-w-md p-6 sm:p-8 rounded-2xl bg-reelo-surface border border-reelo-border shadow-card space-y-6">
       <div className="text-center space-y-1.5">
@@ -47,7 +41,7 @@ export function LoginForm() {
           Welcome Back to REELO
         </h2>
         <p className="text-xs sm:text-sm text-reelo-muted">
-          Enter your credentials to access your creator dashboard.
+          Enter your Supabase credentials to access your creator dashboard.
         </p>
       </div>
 
@@ -99,27 +93,6 @@ export function LoginForm() {
           <ArrowRight className="w-4 h-4 ml-1" />
         </Button>
       </form>
-
-      {/* Quick Demo Access */}
-      <div className="relative pt-2">
-        <div className="absolute inset-0 flex items-center">
-          <div className="w-full border-t border-reelo-border" />
-        </div>
-        <div className="relative flex justify-center text-[10px] uppercase font-semibold">
-          <span className="bg-reelo-surface px-2 text-reelo-muted">Quick Access</span>
-        </div>
-      </div>
-
-      <Button
-        type="button"
-        variant="secondary"
-        size="md"
-        className="w-full font-semibold border-reelo-border hover:bg-reelo-surfaceMuted"
-        onClick={handleInstantDemoLogin}
-      >
-        <UserCheck className="w-4 h-4 mr-1.5 text-reelo-secondary" />
-        Sign In as Local Demo User
-      </Button>
 
       <p className="text-center text-xs text-reelo-muted">
         New to REELO?{' '}

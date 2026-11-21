@@ -1,58 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET() {
   try {
-    const db = getDb();
-    const userId = DEMO_CURRENT_USER.id;
+    const supabase = createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    const query = `
-      SELECT n.*,
-             a.id as actor_id, a.username as actor_username, a.full_name as actor_full_name,
-             a.avatar_url as actor_avatar_url, a.is_verified as actor_is_verified
-      FROM notifications n
-      JOIN profiles a ON n.actor_id = a.id
-      WHERE n.user_id = ?
-      ORDER BY n.created_at DESC
-    `;
+    if (authError || !user) {
+      return NextResponse.json({ notifications: [] });
+    }
 
-    const rows = db.prepare(query).all(userId) as any[];
+    const { data: notifications, error } = await supabase
+      .from('notifications')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
 
-    const notifications = rows.map((r) => ({
-      id: r.id,
-      user_id: r.user_id,
-      actor_id: r.actor_id,
-      type: r.type,
-      post_id: r.post_id,
-      is_read: Boolean(r.is_read),
-      created_at: r.created_at,
-      actor: {
-        id: r.actor_id,
-        username: r.actor_username,
-        full_name: r.actor_full_name,
-        avatar_url: r.actor_avatar_url,
-        is_verified: Boolean(r.actor_is_verified),
-      },
-    }));
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
-    return NextResponse.json({ notifications });
+    return NextResponse.json({ notifications: notifications || [] });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function POST() {
+export async function PATCH() {
   try {
-    const db = getDb();
-    const userId = DEMO_CURRENT_USER.id;
+    const supabase = createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    db.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ?').run(userId);
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
+    const { error } = await (supabase
+      .from('notifications') as any)
+      .update({ is_read: true })
+      .eq('user_id', user.id);
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

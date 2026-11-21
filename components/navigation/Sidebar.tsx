@@ -19,9 +19,8 @@ import {
 import { MAIN_NAV_ITEMS } from '@/lib/constants/navigation';
 import { BrandLogo } from './BrandLogo';
 import { Avatar } from '@/components/ui/Avatar';
-import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
 import { cn } from '@/lib/utils/cn';
-import { authService } from '@/services/authService';
+import { useAuth } from '@/hooks/useAuth';
 
 const iconMap: Record<string, any> = {
   Home,
@@ -39,9 +38,10 @@ const iconMap: Record<string, any> = {
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { user, logout } = useAuth();
 
   const handleLogout = async () => {
-    await authService.signOut();
+    await logout();
     router.push('/login');
   };
 
@@ -122,38 +122,48 @@ export function Sidebar() {
 
       {/* User Footer Profile Pill & Sign Out */}
       <div className="pt-4 border-t border-reelo-border space-y-2">
-        <Link
-          href="/profile"
-          className="flex items-center justify-between p-2 rounded-xl hover:bg-reelo-surfaceMuted transition-colors group"
-        >
-          <div className="flex items-center gap-3">
-            <Avatar
-              src={DEMO_CURRENT_USER.avatar_url}
-              alt={DEMO_CURRENT_USER.full_name}
-              size="sm"
-              isVerified={DEMO_CURRENT_USER.is_verified}
-            />
-            <div className="text-left">
-              <p className="text-xs font-semibold text-reelo-text group-hover:text-reelo-primary truncate max-w-[110px]">
-                {DEMO_CURRENT_USER.full_name}
-              </p>
-              <p className="text-[11px] text-reelo-muted truncate max-w-[110px]">
-                @{DEMO_CURRENT_USER.username}
-              </p>
-            </div>
-          </div>
-          <Settings className="w-4 h-4 text-reelo-muted group-hover:text-reelo-text transition-colors" />
-        </Link>
+        {user ? (
+          <>
+            <Link
+              href="/profile"
+              className="flex items-center justify-between p-2 rounded-xl hover:bg-reelo-surfaceMuted transition-colors group"
+            >
+              <div className="flex items-center gap-3">
+                <Avatar
+                  src={user.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.username}`}
+                  alt={user.full_name}
+                  size="sm"
+                  isVerified={user.is_verified}
+                />
+                <div className="text-left">
+                  <p className="text-xs font-semibold text-reelo-text group-hover:text-reelo-primary truncate max-w-[110px]">
+                    {user.full_name}
+                  </p>
+                  <p className="text-[11px] text-reelo-muted truncate max-w-[110px]">
+                    @{user.username}
+                  </p>
+                </div>
+              </div>
+              <Settings className="w-4 h-4 text-reelo-muted group-hover:text-reelo-text transition-colors" />
+            </Link>
 
-        {/* Sign Out Action Button */}
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center justify-center gap-2 py-1.5 px-3 text-xs font-medium text-reelo-muted hover:text-reelo-danger hover:bg-rose-50 rounded-lg transition-colors"
-          title="Sign Out of REELO"
-        >
-          <LogOut className="w-3.5 h-3.5" />
-          <span>Sign Out</span>
-        </button>
+            <button
+              onClick={handleLogout}
+              className="w-full flex items-center justify-center gap-2 py-1.5 px-3 text-xs font-medium text-reelo-muted hover:text-reelo-danger hover:bg-rose-50 rounded-lg transition-colors"
+              title="Sign Out of REELO"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Sign Out</span>
+            </button>
+          </>
+        ) : (
+          <Link
+            href="/login"
+            className="flex items-center justify-center gap-2 w-full py-2 px-3 text-xs font-semibold text-reelo-primary bg-reelo-surfaceMuted hover:bg-reelo-border rounded-lg transition-colors"
+          >
+            <span>Sign In to REELO</span>
+          </Link>
+        )}
       </div>
     </aside>
   );

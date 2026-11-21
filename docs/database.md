@@ -1,8 +1,8 @@
 # REELO — Database Schema & Data Architecture
 
 **Version:** 2.0
-**Production engine:** Supabase PostgreSQL 15+
-**Local engine:** SQLite (`node:sqlite`, dev only)
+**Primary engine:** Cloud Supabase PostgreSQL 15+ (Auth, PostgreSQL, Storage, Realtime)
+**Local PC Storage:** Decommissioned (User data, posts, and accounts are never stored on PC)
 **Source of truth:** `memory.md`
 
 > Migrations are additive and numbered. Never edit an applied migration. Every exposed table has RLS.

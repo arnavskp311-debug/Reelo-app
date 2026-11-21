@@ -1,34 +1,48 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const db = getDb();
+    const supabase = createServerSupabaseClient();
     const { searchParams } = new URL(req.url);
     const status = searchParams.get('status') || 'pending';
 
-    const stmt = db.prepare(`
-      SELECT 
-        r.*,
-        p.username as reporter_username,
-        p.full_name as reporter_name
-      FROM reports r
-      LEFT JOIN profiles p ON r.reporter_id = p.id
-      WHERE r.status = ?
-      ORDER BY r.created_at DESC
-    `);
+    const { data: reports, error } = await supabase
+      .from('reports')
+      .select(`
+        *,
+        reporter:profiles!reports_reporter_id_fkey(username, full_name)
+      `)
+      .eq('status', status)
+      .order('created_at', { ascending: false });
 
-    const reports = stmt.all(status);
-    return NextResponse.json({ reports });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const formatted = (reports || []).map((r: any) => ({
+      ...r,
+      reporter_username: r.reporter?.username,
+      reporter_name: r.reporter?.full_name,
+    }));
+
+    return NextResponse.json({ reports: formatted });
   } catch (error: any) {
-    console.error('Failed to fetch reports:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
+    const supabase = createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const body = await req.json();
     const { target_type, target_id, reason, details } = body;
 
@@ -39,45 +53,38 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const db = getDb();
-    const reportId = `rep_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    const now = new Date().toISOString();
-
-    const insertStmt = db.prepare(`
-      INSERT INTO reports (
-        id, reporter_id, target_type, target_id, reason, details, status, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
-    `);
-
-    insertStmt.run(
-      reportId,
-      DEMO_CURRENT_USER.id,
-      target_type,
-      target_id,
-      reason,
-      details || '',
-      now
-    );
-
-    return NextResponse.json({
-      success: true,
-      report: {
-        id: reportId,
+    const { data: report, error } = await supabase
+      .from('reports')
+      .insert({
+        reporter_id: user.id,
         target_type,
         target_id,
         reason,
+        details: details || '',
         status: 'pending',
-        created_at: now,
-      },
-    });
+      } as any)
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ success: true, report });
   } catch (error: any) {
-    console.error('Failed to submit report:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function PATCH(req: NextRequest) {
   try {
+    const supabase = createServerSupabaseClient();
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
+    }
+
     const body = await req.json();
     const { report_id, status, action } = body;
 
@@ -85,31 +92,39 @@ export async function PATCH(req: NextRequest) {
       return NextResponse.json({ error: 'Missing report_id or status' }, { status: 400 });
     }
 
-    const db = getDb();
     const now = new Date().toISOString();
 
-    // If moderator chose to remove content, delete post
+    // If moderator chose to remove content, delete post from Supabase
     if (action === 'delete_content') {
-      const reportStmt = db.prepare('SELECT target_type, target_id FROM reports WHERE id = ?');
-      const report = reportStmt.get(report_id) as any;
+      const { data: report } = await supabase
+        .from('reports')
+        .select('target_type, target_id')
+        .eq('id', report_id)
+        .maybeSingle();
 
-      if (report && report.target_type === 'post') {
-        const deletePostStmt = db.prepare('DELETE FROM posts WHERE id = ?');
-        deletePostStmt.run(report.target_id);
+      if (report && (report as any).target_type === 'post') {
+        await supabase
+          .from('posts')
+          .delete()
+          .eq('id', (report as any).target_id);
       }
     }
 
-    const updateStmt = db.prepare(`
-      UPDATE reports
-      SET status = ?, resolved_at = ?, resolved_by = ?
-      WHERE id = ?
-    `);
+    const { error: updateError } = await (supabase
+      .from('reports') as any)
+      .update({
+        status,
+        resolved_at: now,
+        resolved_by: user.id,
+      })
+      .eq('id', report_id);
 
-    updateStmt.run(status, now, DEMO_CURRENT_USER.id, report_id);
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
 
     return NextResponse.json({ success: true, report_id, status });
   } catch (error: any) {
-    console.error('Failed to update report:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

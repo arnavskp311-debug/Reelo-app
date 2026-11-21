@@ -1,27 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
+
+export const dynamic = 'force-dynamic';
 
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = getDb();
+    const supabase = createServerSupabaseClient();
     const postId = params.id;
 
-    const query = `
-      SELECT c.*, u.username, u.full_name, u.avatar_url, u.is_verified
-      FROM comments c
-      JOIN profiles u ON c.user_id = u.id
-      WHERE c.post_id = ?
-      ORDER BY c.created_at ASC
-    `;
+    const { data: comments, error } = await supabase
+      .from('comments')
+      .select(`
+        *,
+        author:profiles!comments_user_id_fkey(*)
+      `)
+      .eq('post_id', postId)
+      .order('created_at', { ascending: true });
 
-    const comments = db.prepare(query).all(postId);
-    return NextResponse.json({ comments });
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ comments: comments || [] });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
@@ -30,39 +35,42 @@ export async function POST(
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = getDb();
+    const supabase = createServerSupabaseClient();
     const postId = params.id;
-    const body = await request.json();
-    const { content, userId = DEMO_CURRENT_USER.id } = body;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    if (!content || !content.trim()) {
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required to comment.' }, { status: 401 });
+    }
+
+    const body = await request.json();
+    const { content, parentId } = body;
+
+    if (!content || typeof content !== 'string' || !content.trim()) {
       return NextResponse.json({ error: 'Comment content cannot be empty.' }, { status: 400 });
     }
 
-    const commentId = `c_${Date.now()}`;
-    const now = new Date().toISOString();
-
-    db.prepare(`
-      INSERT INTO comments (id, user_id, post_id, content, likes_count, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 0, ?, ?)
-    `).run(commentId, userId, postId, content.trim(), now, now);
-
-    db.prepare('UPDATE posts SET comments_count = comments_count + 1 WHERE id = ?').run(postId);
-
-    const user = db.prepare('SELECT username, full_name, avatar_url, is_verified FROM profiles WHERE id = ?').get(userId);
-
-    return NextResponse.json({
-      comment: {
-        id: commentId,
-        user_id: userId,
+    const { data: comment, error } = await supabase
+      .from('comments')
+      .insert({
         post_id: postId,
+        user_id: user.id,
         content: content.trim(),
+        parent_id: parentId || null,
         likes_count: 0,
-        created_at: now,
-        profile: user,
-      },
-    });
+      } as any)
+      .select(`
+        *,
+        author:profiles!comments_user_id_fkey(*)
+      `)
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ comment }, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

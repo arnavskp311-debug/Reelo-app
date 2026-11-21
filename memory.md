@@ -184,41 +184,40 @@ Keyboard reachable controls, visible focus ring (`accent`), `aria-label` on icon
 
 ## 3. Technical Architecture
 
-### 3.1 Stack (current + target)
+### 3.1 Stack (Single Cloud Data Store: Supabase)
 
-| Layer | MVP local | Production target |
+| Layer | Technology | Configuration & Status |
 |---|---|---|
-| Web | Next.js 14 App Router, React 18, TypeScript strict | same |
-| Styling | Tailwind CSS 3.4 + tokens | same |
-| Icons | Lucide React | same |
-| Motion | Framer Motion (sparingly) | same |
-| Auth | Local adapter: scrypt + signed HttpOnly session | Supabase Auth (email/password) |
-| Database | SQLite via `node:sqlite` (`data/reelo.db`) — **dev only** | Supabase PostgreSQL + RLS |
-| Storage | Local `/public/uploads` or Supabase Storage | Supabase Storage + image/video transforms |
-| Realtime | Polling (MVP notifications only) | Supabase Realtime |
-| Mobile | — | React Native + Expo, shared API |
+| Web | Next.js 14 App Router, React 18, TypeScript strict | Active, production compiled |
+| Styling | Tailwind CSS 3.4 + Natural Premium design tokens | Active |
+| Icons | Lucide React | Active |
+| Motion | Framer Motion | Active |
+| Auth | Cloud Supabase Auth (email/password, PKCE session cookies) | Active (no local/demo fallbacks) |
+| Database | Cloud Supabase PostgreSQL + Row Level Security (RLS) | Active primary data store |
+| Storage | Cloud Supabase Storage (media buckets & CDN transforms) | Target cloud storage |
+| Realtime | Supabase Realtime (presence, notifications, messaging) | Primary cloud realtime engine |
+| Mobile | React Native + Expo (shares same Supabase backend) | Future target |
+| Local SQLite | `lib/db/index.ts`, `scripts/init-local-db.js` | **DECOMMISSIONED / Inactive legacy reference only** |
 
-**Decision:** Supabase is the production backend. SQLite exists only so development works without credentials. The application must talk to a service layer, never to `getDb()` from UI components, so the adapter can be swapped.
+**Critical Architectural Mandate:** REELO must not store user data, posts, media, or account records locally on the user's PC. Cloud Supabase is the sole data store. All services (`services/*`) and Route Handlers (`app/api/*`) target Supabase Auth and PostgreSQL directly.
 
-### 3.2 Backend adapter strategy
+### 3.2 Backend Service Strategy
 
 ```
-UI (server/client components)
+UI (Server & Client Components)
         │
         ▼
-services/*.ts        ← domain logic, authorization-aware
+services/*.ts        ← Domain logic targeting Cloud Supabase directly via @supabase/ssr / client
         │
         ▼
-lib/backend/*        ← adapter interface
-   ├── local/        ← SQLite + scrypt sessions (dev)
-   └── supabase/     ← Postgres + Supabase Auth (prod)
+Cloud Supabase       ← Auth, PostgreSQL + RLS, Storage, Realtime
 ```
 
 Rules:
-- `services/` is the only place business rules live.
-- Route handlers are thin: parse → validate → call service → map response.
-- No SQL in components. No `fetch` from services to own API. No secrets in client bundles.
-- Select the adapter with `BACKEND=local|supabase`. Fail fast if required env vars are missing.
+- `services/` targets Supabase directly; no mock user or demo data fallbacks.
+- Route handlers (`app/api/*`) use `createServerSupabaseClient()` with session cookies.
+- No local PC SQLite data files (`data/*.db`) are created or queried at runtime.
+- No client-side exposure of `SUPABASE_SERVICE_ROLE_KEY`. Only `NEXT_PUBLIC_SUPABASE_ANON_KEY` is utilized with RLS policies.
 
 ### 3.3 Repository structure (target)
 
@@ -1016,6 +1015,7 @@ Legend: `PROTOTYPE` = UI/demo only · `IN_PROGRESS` = partial real logic · `NOT
 | D-010 | Full form: Real Expressions, Everyday Life, Online | Brand meaning | 2026-11-21 |
 | D-011 | Private profiles auto-accept follows in MVP | Avoid a follow-request system before Phase 2 | 2026-11-21 |
 | D-012 | Single-choice poll uniqueness enforced in service + partial index | Supports multi-choice without schema fork | 2026-11-21 |
+| D-013 | Cloud Supabase is the sole data store; local PC SQLite data storage strictly decommissioned | Prevents local data persistence on user PC; ensures cloud scale, centralized Auth, Storage, and PostgreSQL integrity | 2026-11-21 |
 
 ---
 

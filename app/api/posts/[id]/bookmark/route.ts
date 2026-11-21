@@ -1,39 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
 ) {
   try {
-    const db = getDb();
+    const supabase = createServerSupabaseClient();
     const postId = params.id;
-    const userId = DEMO_CURRENT_USER.id;
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
 
-    const existingBookmark = db
-      .prepare('SELECT id FROM bookmarks WHERE post_id = ? AND user_id = ?')
-      .get(postId, userId);
-
-    let bookmarked = false;
-
-    if (existingBookmark) {
-      db.prepare('DELETE FROM bookmarks WHERE post_id = ? AND user_id = ?').run(postId, userId);
-      bookmarked = false;
-    } else {
-      const bId = `bm_${Date.now()}`;
-      db.prepare('INSERT INTO bookmarks (id, user_id, post_id, created_at) VALUES (?, ?, ?, ?)').run(
-        bId,
-        userId,
-        postId,
-        new Date().toISOString()
-      );
-      bookmarked = true;
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
     }
 
-    return NextResponse.json({ bookmarked });
+    const { data: existingBookmark } = await supabase
+      .from('bookmarks')
+      .select('id')
+      .eq('post_id', postId)
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (existingBookmark && (existingBookmark as any).id) {
+      await supabase.from('bookmarks').delete().eq('id', (existingBookmark as any).id);
+      return NextResponse.json({ bookmarked: false });
+    } else {
+      await supabase.from('bookmarks').insert({ post_id: postId, user_id: user.id } as any);
+      return NextResponse.json({ bookmarked: true });
+    }
   } catch (error: any) {
-    console.error('Bookmark toggle error in local SQLite:', error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

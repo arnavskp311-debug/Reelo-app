@@ -1,3 +1,11 @@
+/**
+ * @deprecated
+ * LEGACY / UNUSED:
+ * REELO strictly uses Cloud Supabase (Auth, PostgreSQL, Storage, Realtime) as its primary data store.
+ * User data, posts, media, or account records are NEVER stored locally on the PC.
+ * This file is retained exclusively as an offline legacy reference and is not part of the active production path.
+ */
+
 import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import fs from 'fs';

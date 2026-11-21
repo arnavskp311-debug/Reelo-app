@@ -1,52 +1,60 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getDb } from '@/lib/db';
-import { Profile } from '@/types';
+import { createServerSupabaseClient } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
-    const db = getDb();
+    const supabase = createServerSupabaseClient();
     const body = await request.json();
-    const { username, fullName, email } = body;
+    const { email, password, username, fullName } = body;
 
-    if (!username || !fullName) {
-      return NextResponse.json({ error: 'Username and Full Name are required.' }, { status: 400 });
+    if (!email || !password || !username || !fullName) {
+      return NextResponse.json({ error: 'All fields are required.' }, { status: 400 });
     }
 
-    const cleanUsername = username.toLowerCase().replace(/[^a-z0-9_]/g, '');
-    const userId = `usr_${Date.now()}`;
-    const now = new Date().toISOString();
+    const cleanUsername = username.toLowerCase().trim();
+    const cleanFullName = fullName.trim();
 
-    const insert = db.prepare(`
-      INSERT INTO profiles (
-        id, username, full_name, avatar_url, banner_url, bio, website, location,
-        is_verified, followers_count, following_count, posts_count, created_at, updated_at
-      ) VALUES (?, ?, ?, null, null, '', null, null, 0, 0, 0, 0, ?, ?)
-    `);
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: {
+          username: cleanUsername,
+          full_name: cleanFullName,
+          avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
+        },
+      },
+    });
 
-    insert.run(userId, cleanUsername, fullName, now, now);
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
 
-    const user: Profile = {
-      id: userId,
-      username: cleanUsername,
-      full_name: fullName,
-      avatar_url: null,
-      banner_url: null,
-      bio: '',
-      website: null,
-      location: null,
-      is_verified: false,
-      followers_count: 0,
-      following_count: 0,
-      posts_count: 0,
-      created_at: now,
-      updated_at: now,
-    };
+    if (!data.user) {
+      return NextResponse.json({ error: 'User registration failed.' }, { status: 400 });
+    }
 
-    return NextResponse.json({ user, error: null });
+    // Ensure profile row exists in Supabase
+    const { data: existingProfile } = await supabase
+      .from('profiles')
+      .select('*')
+      .eq('id', data.user.id)
+      .single();
+
+    if (!existingProfile) {
+      await supabase.from('profiles').insert({
+        id: data.user.id,
+        username: cleanUsername,
+        full_name: cleanFullName,
+        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${cleanUsername}`,
+        followers_count: 0,
+        following_count: 0,
+        posts_count: 0,
+      } as any);
+    }
+
+    return NextResponse.json({ user: data.user, session: data.session });
   } catch (error: any) {
-    if (error.message?.includes('UNIQUE constraint failed')) {
-      return NextResponse.json({ error: 'Username is already taken.' }, { status: 400 });
-    }
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ error: error.message || 'Internal server error.' }, { status: 500 });
   }
 }

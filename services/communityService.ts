@@ -1,25 +1,48 @@
 import { Community } from '@/types';
-import { DEMO_COMMUNITIES } from '@/lib/constants/demo-data';
+import { supabase } from '@/lib/supabase/client';
 
 export const communityService = {
+  /**
+   * Fetch all communities from Supabase PostgreSQL.
+   */
   async getCommunities(): Promise<Community[]> {
-    if (typeof window !== 'undefined') {
-      try {
-        const res = await fetch('/api/communities', { cache: 'no-store' });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.communities) return data.communities;
-        }
-      } catch (err) {
-        console.warn('Local communities API fetch failed:', err);
-      }
-    }
+    try {
+      const { data, error } = await supabase
+        .from('communities')
+        .select('*')
+        .order('members_count', { ascending: false });
 
-    return DEMO_COMMUNITIES;
+      if (error || !data) {
+        console.error('Error fetching communities from Supabase:', error);
+        return [];
+      }
+
+      return data as Community[];
+    } catch (err) {
+      console.error('Error in communityService.getCommunities:', err);
+      return [];
+    }
   },
 
+  /**
+   * Fetch a single community by its unique slug from Supabase.
+   */
   async getCommunityBySlug(slug: string): Promise<Community | null> {
-    const list = await this.getCommunities();
-    return list.find((c) => c.slug === slug) || null;
+    try {
+      const { data, error } = await supabase
+        .from('communities')
+        .select('*')
+        .eq('slug', slug)
+        .single();
+
+      if (error || !data) {
+        return null;
+      }
+
+      return data as Community;
+    } catch (err) {
+      console.error('Error in communityService.getCommunityBySlug:', err);
+      return null;
+    }
   },
 };
