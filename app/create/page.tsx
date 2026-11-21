@@ -12,6 +12,7 @@ import {
   Send,
   X,
   ArrowLeft,
+  Upload,
 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { Card } from '@/components/ui/Card';
@@ -28,6 +29,35 @@ export default function CreatePostPage() {
   const [tags, setTags] = useState<string[]>(['REELO']);
   const [selectedCommunity, setSelectedCommunity] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const res = await fetch('/api/uploads', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+      if (res.ok && data.url) {
+        setMediaUrl(data.url);
+        setMediaType(data.mediaType === 'video' ? 'video' : 'image');
+      } else {
+        alert(data.error || 'Failed to upload media file');
+      }
+    } catch (err: any) {
+      alert(err.message || 'Upload failed');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   // Preset sample media for easy 1-click testing in demo mode
   const sampleMediaPresets = [
@@ -179,7 +209,28 @@ export default function CreatePostPage() {
                 />
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-reelo-primary text-white text-xs font-semibold cursor-pointer hover:bg-reelo-primary-hover shadow-subtle transition-all">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>{isUploading ? 'Uploading file...' : 'Choose File from PC'}</span>
+                    <input
+                      type="file"
+                      accept="image/*,video/*,audio/*"
+                      onChange={handleFileUpload}
+                      disabled={isUploading}
+                      className="hidden"
+                    />
+                  </label>
+                  <span className="text-[11px] text-reelo-muted">Supports photos, 9:16 reels & video clips</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="h-px flex-1 bg-reelo-border" />
+                  <span className="text-[10px] text-reelo-muted uppercase tracking-wider font-semibold">Or link URL</span>
+                  <div className="h-px flex-1 bg-reelo-border" />
+                </div>
+
                 <input
                   type="url"
                   value={mediaUrl}

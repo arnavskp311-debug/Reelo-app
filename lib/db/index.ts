@@ -221,7 +221,189 @@ function initSchema(db: DatabaseSync) {
       resolved_at TEXT,
       resolved_by TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS stories (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      media_url TEXT NOT NULL,
+      media_type TEXT DEFAULT 'image',
+      text_overlay TEXT,
+      background_color TEXT DEFAULT '#243746',
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS story_views (
+      id TEXT PRIMARY KEY,
+      story_id TEXT NOT NULL,
+      viewer_id TEXT NOT NULL,
+      viewed_at TEXT NOT NULL,
+      UNIQUE(story_id, viewer_id),
+      FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS story_reactions (
+      id TEXT PRIMARY KEY,
+      story_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      emoji TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(story_id, user_id, emoji),
+      FOREIGN KEY (story_id) REFERENCES stories(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS polls (
+      id TEXT PRIMARY KEY,
+      post_id TEXT UNIQUE NOT NULL,
+      question TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_options (
+      id TEXT PRIMARY KEY,
+      poll_id TEXT NOT NULL,
+      option_text TEXT NOT NULL,
+      votes_count INTEGER DEFAULT 0,
+      FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS poll_votes (
+      id TEXT PRIMARY KEY,
+      poll_id TEXT NOT NULL,
+      option_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(poll_id, user_id),
+      FOREIGN KEY (poll_id) REFERENCES polls(id) ON DELETE CASCADE,
+      FOREIGN KEY (option_id) REFERENCES poll_options(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS collections (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      is_private INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS collection_items (
+      id TEXT PRIMARY KEY,
+      collection_id TEXT NOT NULL,
+      post_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(collection_id, post_id),
+      FOREIGN KEY (collection_id) REFERENCES collections(id) ON DELETE CASCADE,
+      FOREIGN KEY (post_id) REFERENCES posts(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS events (
+      id TEXT PRIMARY KEY,
+      creator_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT NOT NULL,
+      cover_url TEXT,
+      start_time TEXT NOT NULL,
+      location_type TEXT DEFAULT 'online',
+      location_details TEXT,
+      attendees_count INTEGER DEFAULT 1,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (creator_id) REFERENCES profiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS event_rsvps (
+      id TEXT PRIMARY KEY,
+      event_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      status TEXT DEFAULT 'going',
+      created_at TEXT NOT NULL,
+      UNIQUE(event_id, user_id),
+      FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS user_badges (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      badge_key TEXT NOT NULL,
+      badge_name TEXT NOT NULL,
+      badge_description TEXT NOT NULL,
+      badge_icon TEXT NOT NULL,
+      unlocked_at TEXT NOT NULL,
+      UNIQUE(user_id, badge_key),
+      FOREIGN KEY (user_id) REFERENCES profiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS live_streams (
+      id TEXT PRIMARY KEY,
+      host_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      category TEXT DEFAULT 'Creative & Design',
+      is_live INTEGER DEFAULT 1,
+      viewers_count INTEGER DEFAULT 0,
+      started_at TEXT NOT NULL,
+      ended_at TEXT,
+      FOREIGN KEY (host_id) REFERENCES profiles(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS live_messages (
+      id TEXT PRIMARY KEY,
+      stream_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      message TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (stream_id) REFERENCES live_streams(id) ON DELETE CASCADE
+    );
   `);
+
+  // Auto-populate default sample events if table is empty
+  const eventsCount = (db.prepare('SELECT COUNT(*) as count FROM events').get() as any)?.count || 0;
+  if (eventsCount === 0) {
+    const now = new Date().toISOString();
+    const insertEvent = db.prepare(`
+      INSERT OR IGNORE INTO events (id, creator_id, title, description, cover_url, start_time, location_type, location_details, attendees_count, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertEvent.run(
+      'evt_01',
+      DEMO_CURRENT_USER.id,
+      'Generative Spatial Audio Hackathon',
+      'A 48-hour hands-on session exploring next-gen ambisonic soundscapes, custom DSP filters, and real-time WebAudio visualizers.',
+      'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=1200&q=80',
+      new Date(Date.now() + 86400000 * 2).toISOString(),
+      'online',
+      'Spatial Lab Discord / Live Stream',
+      48,
+      now
+    );
+    insertEvent.run(
+      'evt_02',
+      DEMO_CURRENT_USER.id,
+      'Editorial Design & Typography Masterclass',
+      'Deep dive into Natural Premium design tokens, asymmetric layouts, accessible contrast, and tactile UI patterns.',
+      'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=1200&q=80',
+      new Date(Date.now() + 86400000 * 5).toISOString(),
+      'online',
+      'REELO Stage Live',
+      124,
+      now
+    );
+  }
+
+  // Auto-populate default badges if table is empty
+  const badgesCount = (db.prepare('SELECT COUNT(*) as count FROM user_badges').get() as any)?.count || 0;
+  if (badgesCount === 0) {
+    const now = new Date().toISOString();
+    const insertBadge = db.prepare(`
+      INSERT OR IGNORE INTO user_badges (id, user_id, badge_key, badge_name, badge_description, badge_icon, unlocked_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertBadge.run('bdg_01', DEMO_CURRENT_USER.id, 'pioneer', 'Platform Pioneer', 'Early member of REELO Alpha network', 'Sparkles', now);
+    insertBadge.run('bdg_02', DEMO_CURRENT_USER.id, 'creator', 'Verified Creator', 'Published high-signal original works', 'CheckCircle2', now);
+    insertBadge.run('bdg_03', DEMO_CURRENT_USER.id, 'community_lead', 'Guild Founder', 'Founded an active community guild', 'Users', now);
+  }
 }
 
 function seedInitialData(db: DatabaseSync) {
@@ -323,4 +505,61 @@ function seedInitialData(db: DatabaseSync) {
   for (const n of DEMO_NOTIFICATIONS) {
     insertNotif.run(n.id, n.user_id, n.actor_id, n.type, n.post_id, n.is_read ? 1 : 0, n.created_at);
   }
+
+  // Insert initial badges
+  const insertBadge = db.prepare(`
+    INSERT OR IGNORE INTO user_badges (id, user_id, badge_key, badge_name, badge_description, badge_icon, unlocked_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const now = new Date().toISOString();
+  insertBadge.run('bdg_01', DEMO_CURRENT_USER.id, 'pioneer', 'Platform Pioneer', 'Early member of REELO Alpha network', 'Sparkles', now);
+  insertBadge.run('bdg_02', DEMO_CURRENT_USER.id, 'creator', 'Verified Creator', 'Published high-signal original works', 'CheckCircle2', now);
+  insertBadge.run('bdg_03', DEMO_CURRENT_USER.id, 'community_lead', 'Guild Founder', 'Founded an active community guild', 'Users', now);
+
+  // Insert initial events
+  const insertEvent = db.prepare(`
+    INSERT OR IGNORE INTO events (id, creator_id, title, description, cover_url, start_time, location_type, location_details, attendees_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insertEvent.run(
+    'evt_01',
+    'usr_sarah_01',
+    'Generative Spatial Audio Hackathon',
+    'A 48-hour hands-on session exploring next-gen ambisonic soundscapes, custom DSP filters, and real-time WebAudio visualizers.',
+    'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=1200&q=80',
+    new Date(Date.now() + 86400000 * 2).toISOString(),
+    'online',
+    'Spatial Lab Discord / Live Stream',
+    48,
+    now
+  );
+  insertEvent.run(
+    'evt_02',
+    'usr_marcus_01',
+    'Editorial Design & Typography Masterclass',
+    'Deep dive into Natural Premium design tokens, asymmetric layouts, accessible contrast, and tactile UI patterns.',
+    'https://images.unsplash.com/photo-1507238691740-187a5b1d37b8?auto=format&fit=crop&w=1200&q=80',
+    new Date(Date.now() + 86400000 * 5).toISOString(),
+    'online',
+    'REELO Stage Live',
+    124,
+    now
+  );
+
+  // Insert initial collections
+  const insertCol = db.prepare(`
+    INSERT OR IGNORE INTO collections (id, user_id, name, description, is_private, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  insertCol.run('col_01', DEMO_CURRENT_USER.id, 'Design Inspiration', 'Editorial UI and typography references', 1, now);
+  insertCol.run('col_02', DEMO_CURRENT_USER.id, 'Audio Stems', 'Favorite modular synth tracks and loops', 0, now);
+
+  // Insert initial stories (24h expiry)
+  const insertStory = db.prepare(`
+    INSERT OR IGNORE INTO stories (id, user_id, media_url, media_type, text_overlay, background_color, expires_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const expiry24h = new Date(Date.now() + 86400000).toISOString();
+  insertStory.run('sty_01', 'usr_sarah_01', 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=800&q=80', 'image', 'Sunset vibes in Bali 🌊', '#1a365d', expiry24h, now);
+  insertStory.run('sty_02', 'usr_marcus_01', 'https://images.unsplash.com/photo-1518770660439-4636190af475?auto=format&fit=crop&w=800&q=80', 'image', 'New mechanical keyboard build ✨', '#243746', expiry24h, now);
 }

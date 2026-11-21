@@ -286,37 +286,49 @@ export function PostCard({ post, onLike, onBookmark, onPostHidden }: PostCardPro
           </div>
         )}
 
-        {/* Post Media Attachment with 3D Tilt & Double-Tap Heart Burst */}
+        {/* Post Media Attachment: Video or Image with 3D Tilt & Double-Tap Heart Burst */}
         {post.media_urls && post.media_urls.length > 0 && (
-          <TiltCard
-            maxTilt={4}
-            scale={1.01}
-            className="relative w-full aspect-video sm:aspect-[16/10] rounded-xl overflow-hidden border border-reelo-border bg-reelo-surfaceMuted cursor-pointer select-none"
-            onClick={handleMediaDoubleTap}
-          >
-            <Image
-              src={post.media_urls[0]}
-              alt="Post media"
-              fill
-              className="object-cover transition-transform duration-300"
-              sizes="(max-width: 768px) 100vw, 640px"
-            />
+          post.media_type === 'video' || post.media_type === 'reel' || post.media_urls[0].match(/\.(mp4|webm|mov)$/i) ? (
+            <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-reelo-border bg-black shadow-subtle">
+              <video
+                src={post.media_urls[0]}
+                controls
+                playsInline
+                preload="metadata"
+                className="w-full h-full object-contain"
+              />
+            </div>
+          ) : (
+            <TiltCard
+              maxTilt={4}
+              scale={1.01}
+              className="relative w-full aspect-video sm:aspect-[16/10] rounded-xl overflow-hidden border border-reelo-border bg-reelo-surfaceMuted cursor-pointer select-none"
+              onClick={handleMediaDoubleTap}
+            >
+              <Image
+                src={post.media_urls[0]}
+                alt="Post media"
+                fill
+                className="object-cover transition-transform duration-300"
+                sizes="(max-width: 768px) 100vw, 640px"
+              />
 
-            {/* Double Tap Heart Burst Animation */}
-            <AnimatePresence>
-              {showHeartBurst && (
-                <motion.div
-                  initial={{ scale: 0, opacity: 0 }}
-                  animate={{ scale: [0, 1.3, 1], opacity: [0, 1, 0] }}
-                  exit={{ scale: 0.8, opacity: 0 }}
-                  transition={{ duration: 0.7, ease: 'easeOut' }}
-                  className="absolute inset-0 flex items-center justify-center pointer-events-none z-30"
-                >
-                  <Heart className="w-24 h-24 fill-rose-500 text-rose-500 drop-shadow-md" />
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </TiltCard>
+              {/* Double Tap Heart Burst Animation */}
+              <AnimatePresence>
+                {showHeartBurst && (
+                  <motion.div
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: [0, 1.3, 1], opacity: [0, 1, 0] }}
+                    exit={{ scale: 0.8, opacity: 0 }}
+                    transition={{ duration: 0.7, ease: 'easeOut' }}
+                    className="absolute inset-0 flex items-center justify-center pointer-events-none z-30"
+                  >
+                    <Heart className="w-24 h-24 fill-rose-500 text-rose-500 drop-shadow-md" />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </TiltCard>
+          )
         )}
 
         {/* Actions Footer */}

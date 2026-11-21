@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   MessageSquare,
   Search,
@@ -10,82 +10,163 @@ import {
   Video,
   Image as ImageIcon,
   Smile,
+  Mic,
+  MicOff,
+  Volume2,
 } from 'lucide-react';
 import { Avatar } from '@/components/ui/Avatar';
 import { Button } from '@/components/ui/Button';
 import { DEMO_USERS, DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
 import { formatTimeAgo } from '@/lib/utils/formatters';
+import { useAuth } from '@/hooks/useAuth';
+import { AudioWaveformPlayer } from '@/components/feed/AudioWaveformPlayer';
 
 interface ChatMessage {
   id: string;
-  senderId: string;
-  text: string;
-  timestamp: string;
+  sender_id: string;
+  recipient_id: string;
+  content: string;
+  created_at: string;
+  is_audio?: boolean;
 }
 
 export default function MessagesPage() {
+  const { user } = useAuth();
+  const currentUserId = user?.id || DEMO_CURRENT_USER.id;
   const [selectedUserId, setSelectedUserId] = useState<string>('usr_01');
   const [inputMessage, setInputMessage] = useState('');
-  const [conversationHistory, setConversationHistory] = useState<Record<string, ChatMessage[]>>({
-    usr_01: [
-      {
-        id: 'm1',
-        senderId: 'usr_01',
-        text: 'Hey Alex! Have you reviewed the newest procedural shader presets?',
-        timestamp: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-      },
-      {
-        id: 'm2',
-        senderId: DEMO_CURRENT_USER.id,
-        text: 'Yes! The reflection response and natural contrast are incredible.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-      },
-      {
-        id: 'm3',
-        senderId: 'usr_01',
-        text: 'Awesome! Let us prepare a community breakdown for tomorrow.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
-      },
-    ],
-    usr_02: [
-      {
-        id: 'm4',
-        senderId: 'usr_02',
-        text: 'Alex, just sent over the analog synth stems for your video montage.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 180).toISOString(),
-      },
-    ],
-    usr_03: [
-      {
-        id: 'm5',
-        senderId: 'usr_03',
-        text: 'We are deploying the updated moderation and security hooks tonight.',
-        timestamp: new Date(Date.now() - 1000 * 60 * 300).toISOString(),
-      },
-    ],
-  });
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
-  const activeUser = DEMO_USERS[selectedUserId] || DEMO_USERS.usr_01;
-  const currentMessages = conversationHistory[selectedUserId] || [];
+  // Fetch messages from local PC database
+  const loadMessages = (peerId: string) => {
+    fetch(`/api/messages?peer_id=${peerId}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.messages && data.messages.length > 0) {
+          setMessages(data.messages);
+        } else {
+          // Default initial friendly conversation starter
+          setMessages([
+            {
+              id: 'init_1',
+              sender_id: peerId,
+              recipient_id: currentUserId,
+              content: 'Hey! Welcome to REELO Direct Messaging. All messages are stored privately on your PC.',
+              created_at: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
+            },
+          ]);
+        }
+      })
+      .catch((err) => console.warn('Could not load messages:', err));
+  };
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  useEffect(() => {
+    loadMessages(selectedUserId);
+    const interval = setInterval(() => {
+      loadMessages(selectedUserId);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [selectedUserId, currentUserId]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!inputMessage.trim()) return;
 
-    const newMsg: ChatMessage = {
-      id: `m_${Date.now()}`,
-      senderId: DEMO_CURRENT_USER.id,
-      text: inputMessage.trim(),
-      timestamp: new Date().toISOString(),
-    };
-
-    setConversationHistory((prev) => ({
-      ...prev,
-      [selectedUserId]: [...(prev[selectedUserId] || []), newMsg],
-    }));
-
+    const textToSend = inputMessage.trim();
     setInputMessage('');
+
+    // Optimistic UI append
+    const tempMsg: ChatMessage = {
+      id: `tmp_${Date.now()}`,
+      sender_id: currentUserId,
+      recipient_id: selectedUserId,
+      content: textToSend,
+      created_at: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, tempMsg]);
+
+    try {
+      await fetch('/api/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          recipient_id: selectedUserId,
+          content: textToSend,
+        }),
+      });
+      loadMessages(selectedUserId);
+    } catch (err) {
+      console.error('Failed to send message:', err);
+    }
   };
+
+  const startVoiceRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        const formData = new FormData();
+        formData.append('file', audioBlob, `voice_${Date.now()}.webm`);
+
+        try {
+          const uploadRes = await fetch('/api/uploads', { method: 'POST', body: formData });
+          const uploadData = await uploadRes.json();
+
+          const audioUrl = uploadData.url || 'voice_note';
+          const voiceContent = `[VOICE_NOTE]:${audioUrl}`;
+
+          await fetch('/api/messages', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              recipient_id: selectedUserId,
+              content: voiceContent,
+            }),
+          });
+          loadMessages(selectedUserId);
+        } catch (err) {
+          console.error('Failed to upload voice note:', err);
+        }
+        stream.getTracks().forEach((t) => t.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.warn('Microphone permission not granted:', err);
+      // Fallback simulated voice note
+      const fallbackVoiceMsg: ChatMessage = {
+        id: `m_audio_${Date.now()}`,
+        sender_id: currentUserId,
+        recipient_id: selectedUserId,
+        content: '[VOICE_NOTE]:sample_stem.mp3',
+        created_at: new Date().toISOString(),
+      };
+      setMessages((prev) => [...prev, fallbackVoiceMsg]);
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const activeUser = DEMO_USERS[selectedUserId] || DEMO_USERS.usr_01;
 
   return (
     <div className="h-[calc(100vh-140px)] flex flex-col md:flex-row rounded-2xl overflow-hidden border border-reelo-border bg-white shadow-subtle">
@@ -98,7 +179,7 @@ export default function MessagesPage() {
               <span>Direct Messages</span>
             </h2>
             <span className="text-[10px] bg-reelo-surfaceMuted text-reelo-primary px-2 py-0.5 rounded-full font-bold">
-              3 Active
+              Local DB
             </span>
           </div>
 
@@ -114,15 +195,13 @@ export default function MessagesPage() {
 
         {/* Contact list items */}
         <div className="flex-1 overflow-y-auto no-scrollbar divide-y divide-reelo-border">
-          {Object.values(DEMO_USERS).map((user) => {
-            const isSelected = user.id === selectedUserId;
-            const userMsgs = conversationHistory[user.id] || [];
-            const lastMsg = userMsgs[userMsgs.length - 1]?.text || 'Started a conversation';
+          {Object.values(DEMO_USERS).map((u) => {
+            const isSelected = u.id === selectedUserId;
 
             return (
               <button
-                key={user.id}
-                onClick={() => setSelectedUserId(user.id)}
+                key={u.id}
+                onClick={() => setSelectedUserId(u.id)}
                 className={`w-full flex items-center gap-3 p-3.5 text-left transition-colors ${
                   isSelected
                     ? 'bg-reelo-surfaceMuted border-l-3 border-reelo-primary'
@@ -130,19 +209,19 @@ export default function MessagesPage() {
                 }`}
               >
                 <Avatar
-                  src={user.avatar_url}
-                  alt={user.full_name}
+                  src={u.avatar_url}
+                  alt={u.full_name}
                   size="md"
-                  isVerified={user.is_verified}
+                  isVerified={u.is_verified}
                 />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between mb-0.5">
                     <p className="text-xs font-bold text-reelo-primary truncate">
-                      {user.full_name}
+                      {u.full_name}
                     </p>
-                    <span className="text-[10px] text-reelo-muted">10m</span>
+                    <span className="text-[10px] text-reelo-muted">Online</span>
                   </div>
-                  <p className="text-[11px] text-reelo-muted truncate">{lastMsg}</p>
+                  <p className="text-[11px] text-reelo-muted truncate">@{u.username}</p>
                 </div>
               </button>
             );
@@ -173,13 +252,13 @@ export default function MessagesPage() {
           </div>
 
           <div className="flex items-center gap-2 text-reelo-muted">
-            <button className="p-2 hover:text-reelo-primary hover:bg-reelo-surfaceMuted rounded-xl transition-colors">
+            <button className="p-2 hover:text-reelo-primary hover:bg-reelo-surfaceMuted rounded-xl transition-colors" title="Audio Call">
               <Phone className="w-4 h-4" />
             </button>
-            <button className="p-2 hover:text-reelo-primary hover:bg-reelo-surfaceMuted rounded-xl transition-colors">
+            <button className="p-2 hover:text-reelo-primary hover:bg-reelo-surfaceMuted rounded-xl transition-colors" title="Video Call">
               <Video className="w-4 h-4" />
             </button>
-            <button className="p-2 hover:text-reelo-primary hover:bg-reelo-surfaceMuted rounded-xl transition-colors">
+            <button className="p-2 hover:text-reelo-primary hover:bg-reelo-surfaceMuted rounded-xl transition-colors" title="More">
               <MoreVertical className="w-4 h-4" />
             </button>
           </div>
@@ -187,8 +266,9 @@ export default function MessagesPage() {
 
         {/* Message Bubble History */}
         <div className="flex-1 p-5 overflow-y-auto space-y-3 no-scrollbar">
-          {currentMessages.map((msg) => {
-            const isMe = msg.senderId === DEMO_CURRENT_USER.id;
+          {messages.map((msg) => {
+            const isMe = msg.sender_id === currentUserId;
+            const isVoice = msg.content.startsWith('[VOICE_NOTE]:');
 
             return (
               <div
@@ -202,13 +282,27 @@ export default function MessagesPage() {
                       : 'bg-white border border-reelo-border text-reelo-text rounded-bl-none'
                   }`}
                 >
-                  <p>{msg.text}</p>
+                  {isVoice ? (
+                    <div className="w-64">
+                      <p className="text-[10px] font-bold text-emerald-400 mb-1 flex items-center gap-1">
+                        <Volume2 className="w-3.5 h-3.5" />
+                        Voice Note
+                      </p>
+                      <AudioWaveformPlayer
+                        title="Recorded Voice Message"
+                        artist={isMe ? 'You' : activeUser.full_name}
+                        duration="0:18"
+                      />
+                    </div>
+                  ) : (
+                    <p>{msg.content}</p>
+                  )}
                   <span
                     className={`block text-[9px] mt-1 text-right font-medium ${
                       isMe ? 'text-white/70' : 'text-reelo-muted'
                     }`}
                   >
-                    {formatTimeAgo(msg.timestamp)}
+                    {formatTimeAgo(msg.created_at)}
                   </span>
                 </div>
               </div>
@@ -216,7 +310,7 @@ export default function MessagesPage() {
           })}
         </div>
 
-        {/* Send Input Bar */}
+        {/* Send Input Bar with Voice Note Recording */}
         <form
           onSubmit={handleSendMessage}
           className="p-3 border-t border-reelo-border flex items-center gap-2 bg-white"
@@ -225,14 +319,23 @@ export default function MessagesPage() {
             <button
               type="button"
               className="p-2 hover:text-reelo-primary hover:bg-reelo-surfaceMuted rounded-lg transition-colors"
+              title="Attach media"
             >
               <ImageIcon className="w-4 h-4" />
             </button>
+
+            {/* Voice Note Button */}
             <button
               type="button"
-              className="p-2 hover:text-reelo-primary hover:bg-reelo-surfaceMuted rounded-lg transition-colors"
+              onClick={isRecording ? stopVoiceRecording : startVoiceRecording}
+              className={`p-2 rounded-lg transition-all ${
+                isRecording
+                  ? 'bg-red-600 text-white animate-pulse'
+                  : 'text-reelo-muted hover:text-reelo-primary hover:bg-reelo-surfaceMuted'
+              }`}
+              title={isRecording ? 'Stop Recording' : 'Record Voice Note'}
             >
-              <Smile className="w-4 h-4" />
+              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
             </button>
           </div>
 
@@ -240,7 +343,8 @@ export default function MessagesPage() {
             type="text"
             value={inputMessage}
             onChange={(e) => setInputMessage(e.target.value)}
-            placeholder={`Message ${activeUser.full_name}...`}
+            placeholder={isRecording ? 'Recording audio... click mic to send voice note' : `Message ${activeUser.full_name}...`}
+            disabled={isRecording}
             className="flex-1 bg-reelo-surfaceMuted border border-reelo-border text-xs text-reelo-text placeholder:text-reelo-muted rounded-lg px-3.5 py-2.5 outline-none focus:border-reelo-secondary focus:ring-1 focus:ring-reelo-secondary/20 transition-all"
           />
 
@@ -248,7 +352,7 @@ export default function MessagesPage() {
             type="submit"
             variant="primary"
             size="sm"
-            disabled={!inputMessage.trim()}
+            disabled={!inputMessage.trim() || isRecording}
             className="rounded-lg px-3.5 py-2 font-bold"
           >
             <Send className="w-3.5 h-3.5" />

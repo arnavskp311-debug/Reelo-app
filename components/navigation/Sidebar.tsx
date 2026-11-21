@@ -15,6 +15,9 @@ import {
   ShieldCheck,
   LogOut,
   Bookmark,
+  BarChart3,
+  Calendar,
+  Radio,
 } from 'lucide-react';
 import { MAIN_NAV_ITEMS } from '@/lib/constants/navigation';
 import { BrandLogo } from './BrandLogo';
@@ -33,6 +36,9 @@ const iconMap: Record<string, any> = {
   Sparkles: Compass,
   Bookmark,
   Settings,
+  BarChart3,
+  Calendar,
+  Radio,
 };
 
 export function Sidebar() {
