@@ -559,7 +559,7 @@ Monetization, ads, e-commerce, dating, encrypted secret chats, crypto, third-par
 5. Live provider choice (LiveKit vs Agora vs Mux)?
 6. Email provider for verification/reset?
 7. Community discovery: algorithmic or curated at launch?
-8. Do private profiles auto-accept follows in MVP or require requests?
+8. Private profiles: auto-accept follows in MVP (decision D-011); revisit follow requests in Phase 2.
 
 > Decisions must be recorded in `memory.md` §16 when resolved.
 

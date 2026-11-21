@@ -726,22 +726,26 @@ Acceptance: real RTMP/WebRTC stream plays; webhook updates status; ended stream 
 ### P5.2 — Advanced recommendations
 
 - Candidate generation (follows, interests, trending, similar creators) → ranking model (learning-to-rank or heuristic v2) → diversity/safety filters.
-- Explainability and user controls; offline evaluation; no engagement-only objective.
-- Acceptance: measurable relevance improvement vs Phase 2 baseline; safety filters cannot be bypassed.
+- Implementation: feature store (Postgres/materialized views first), offline evaluation set, shadow mode before rollout, fallback to Phase 2 ranking if the model fails.
+- Explainability and user controls; no engagement-only objective; log which signals were used.
+- Acceptance: measurable relevance improvement vs Phase 2 baseline; safety filters cannot be bypassed; fallback path tested.
 
 ### P5.3 — Advanced moderation
 
 - Classifiers for spam/hate/NSFW (provider or self-hosted), human review queue, appeals, strike system, transparency log.
+- Implementation: async moderation queue, confidence thresholds, auto-hide only above high confidence, human review for ambiguous cases, strike escalation (warn → restrict → suspend).
 - Acceptance: appeals workflow audited; false-positive rate tracked; no auto-ban without review for ambiguous classes.
 
 ### P5.4 — Platform analytics
 
 - Admin dashboards: DAU/WAU/MAU, retention, content volume, report SLA, growth; privacy-safe aggregates.
+- Implementation: event warehouse (Postgres → BigQuery/ClickHouse if needed), daily rollups, admin-only API, no PII.
 - Acceptance: numbers reproducible from warehouse/events.
 
 ### P5.5 — Scalability & optimization
 
 - Read replicas/caching, CDN, image/video transcoding, queue workers for media/notifications, DB partitioning, load tests (k6), SLOs, incident runbook.
+- Implementation order: indexes → query tuning → caching → CDN → async workers → replicas → partitioning.
 - Acceptance: p95 targets met at 10× baseline load; no single point of failure in critical path.
 
 ---
