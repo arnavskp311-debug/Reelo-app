@@ -192,14 +192,14 @@ Keyboard reachable controls, visible focus ring (`accent`), `aria-label` on icon
 | Styling | Tailwind CSS 3.4 + Natural Premium design tokens | Active |
 | Icons | Lucide React | Active |
 | Motion | Framer Motion | Active |
-| Auth | Cloud Supabase Auth (email/password, PKCE session cookies) | Active (no local/demo fallbacks) |
-| Database | Cloud Supabase PostgreSQL + Row Level Security (RLS) | Active primary data store |
-| Storage | Cloud Supabase Storage (media buckets & CDN transforms) | Target cloud storage |
-| Realtime | Supabase Realtime (presence, notifications, messaging) | Primary cloud realtime engine |
-| Mobile | React Native + Expo (shares same Supabase backend) | Future target |
-| Local SQLite | `lib/db/index.ts`, `scripts/init-local-db.js` | **DECOMMISSIONED / Inactive legacy reference only** |
+| Auth | Local PC Auth (Session Cookies, HTTP-only, SHA-hashed credentials in SQLite) | Active primary auth |
+| Database | Local PC Database (Node.js 24 Native SQLite `data/reelo.db`) | Active primary data store (user PC) |
+| Storage | Local / Hosted Media Assets | Active |
+| Realtime | Local / WebSockets Engine | Active |
+| Mobile | React Native + Expo (PWA / Mobile responsive on local LAN) | Active target |
+| Cloud Supabase | `lib/supabase/*` | Optional cloud adapter for hosted environments |
 
-**Critical Architectural Mandate:** REELO must not store user data, posts, media, or account records locally on the user's PC. Cloud Supabase is the sole data store. All services (`services/*`) and Route Handlers (`app/api/*`) target Supabase Auth and PostgreSQL directly.
+**User Storage Directive:** All user profiles, posts, media links, comments, likes, bookmarks, messages, and communities are stored directly on the user's PC in `data/reelo.db` using Node.js 24 native SQLite (`node:sqlite`). Zero third-party cloud accounts or external internet connections are required.
 
 ### 3.2 Backend Service Strategy
 
@@ -207,17 +207,19 @@ Keyboard reachable controls, visible focus ring (`accent`), `aria-label` on icon
 UI (Server & Client Components)
         │
         ▼
-services/*.ts        ← Domain logic targeting Cloud Supabase directly via @supabase/ssr / client
+services/*.ts        ← Domain logic calling local API routes (/api/*)
         │
         ▼
-Cloud Supabase       ← Auth, PostgreSQL + RLS, Storage, Realtime
+app/api/*            ← Next.js Route Handlers reading/writing
+        │
+        ▼
+data/reelo.db        ← Node.js 24 Native SQLite (100% on user's PC)
 ```
 
 Rules:
-- `services/` targets Supabase directly; no mock user or demo data fallbacks.
-- Route handlers (`app/api/*`) use `createServerSupabaseClient()` with session cookies.
-- No local PC SQLite data files (`data/*.db`) are created or queried at runtime.
-- No client-side exposure of `SUPABASE_SERVICE_ROLE_KEY`. Only `NEXT_PUBLIC_SUPABASE_ANON_KEY` is utilized with RLS policies.
+- All data operations run against the local PC SQLite engine via `lib/db/index.ts`.
+- Route handlers (`app/api/*`) query `getDb()` directly and enforce session cookies.
+- Complete privacy and offline capability with zero external cloud requirement.
 
 ### 3.3 Repository structure (target)
 

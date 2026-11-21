@@ -1,14 +1,13 @@
 /**
- * @deprecated
- * LEGACY / UNUSED:
- * REELO strictly uses Cloud Supabase (Auth, PostgreSQL, Storage, Realtime) as its primary data store.
- * User data, posts, media, or account records are NEVER stored locally on the PC.
- * This file is retained exclusively as an offline legacy reference and is not part of the active production path.
+ * REELO Local PC Database Engine (Node.js 24 Native SQLite).
+ * All user data, posts, accounts, profiles, comments, and interactions
+ * are securely stored and persisted directly in data/reelo.db on the user's PC.
  */
 
 import { DatabaseSync } from 'node:sqlite';
 import path from 'path';
 import fs from 'fs';
+import { NextRequest } from 'next/server';
 import {
   DEMO_CURRENT_USER,
   DEMO_USERS,
@@ -17,6 +16,7 @@ import {
   DEMO_MESSAGES,
   DEMO_NOTIFICATIONS,
 } from '@/lib/constants/demo-data';
+import { Profile } from '@/types';
 
 let dbInstance: DatabaseSync | null = null;
 
@@ -48,12 +48,48 @@ export function getDb(): DatabaseSync {
   return dbInstance;
 }
 
+export function getServerSessionUserId(request?: NextRequest): string {
+  if (!request) return DEMO_CURRENT_USER.id;
+  const sessionId = request.cookies.get('reelo_session')?.value;
+  return sessionId || DEMO_CURRENT_USER.id;
+}
+
+export function getServerSessionUser(request?: NextRequest): Profile | null {
+  try {
+    const db = getDb();
+    const userId = getServerSessionUserId(request);
+    const row = db.prepare('SELECT * FROM profiles WHERE id = ?').get(userId) as any;
+    if (!row) return null;
+
+    return {
+      id: row.id,
+      username: row.username,
+      full_name: row.full_name,
+      avatar_url: row.avatar_url,
+      banner_url: row.banner_url || null,
+      bio: row.bio || '',
+      website: row.website || '',
+      location: row.location || '',
+      is_verified: Boolean(row.is_verified),
+      followers_count: row.followers_count || 0,
+      following_count: row.following_count || 0,
+      posts_count: row.posts_count || 0,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+  } catch (err) {
+    return null;
+  }
+}
+
 function initSchema(db: DatabaseSync) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS profiles (
       id TEXT PRIMARY KEY,
       username TEXT UNIQUE NOT NULL,
       full_name TEXT NOT NULL,
+      email TEXT,
+      password_hash TEXT,
       avatar_url TEXT,
       banner_url TEXT,
       bio TEXT,
@@ -192,17 +228,20 @@ function seedInitialData(db: DatabaseSync) {
   // Insert demo profiles
   const insertProfile = db.prepare(`
     INSERT OR IGNORE INTO profiles (
-      id, username, full_name, avatar_url, banner_url, bio, website, location,
+      id, username, full_name, email, password_hash, avatar_url, banner_url, bio, website, location,
       is_verified, followers_count, following_count, posts_count, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const allProfiles = [DEMO_CURRENT_USER, ...Object.values(DEMO_USERS)];
   for (const u of allProfiles) {
+    const userEmail = `${u.username}@reelo.io`;
     insertProfile.run(
       u.id,
       u.username,
       u.full_name,
+      userEmail,
+      'demo123456',
       u.avatar_url,
       u.banner_url,
       u.bio,

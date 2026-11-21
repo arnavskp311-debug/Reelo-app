@@ -17,7 +17,7 @@ export function Header() {
         <div className="hidden sm:flex items-center gap-2">
           <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-md text-xs font-medium bg-reelo-surfaceMuted text-reelo-text border border-reelo-border">
             <span className="w-2 h-2 rounded-full bg-emerald-600" />
-            <span className="text-[11px] text-reelo-primary font-semibold">Cloud Supabase</span>
+            <span className="text-[11px] text-reelo-primary font-semibold">Local PC Database (SQLite)</span>
           </span>
         </div>
       </div>

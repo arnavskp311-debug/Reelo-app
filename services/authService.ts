@@ -1,6 +1,4 @@
 import { Profile } from '@/types';
-import { supabase } from '@/lib/supabase/client';
-import { isSupabaseConfigured } from '@/lib/supabase/config';
 
 export interface AuthResponse {
   user: Profile | null;
@@ -9,196 +7,111 @@ export interface AuthResponse {
 
 export const authService = {
   /**
-   * Register a new user with Supabase Auth and initialize their cloud profile.
+   * Register a new user account stored directly in the local PC database.
    */
   async signUp(email: string, password: string, username: string, fullName: string): Promise<AuthResponse> {
-    if (!isSupabaseConfigured()) {
-      return {
-        user: null,
-        error: 'Supabase credentials missing: Please create .env.local with your NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable Cloud Authentication.',
-      };
-    }
-
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: {
-          data: {
-            username: username.toLowerCase().trim(),
-            full_name: fullName.trim(),
-            avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username.toLowerCase().trim()}`,
-          },
-        },
+      const res = await fetch('/api/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          password: password.trim(),
+          username: username.toLowerCase().trim(),
+          fullName: fullName.trim(),
+        }),
       });
 
-      if (authError) {
-        return { user: null, error: authError.message };
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        return { user: null, error: data.error || 'Signup failed.' };
       }
 
-      if (!authData.user) {
-        return { user: null, error: 'Registration failed. No user was returned.' };
+      if (typeof window !== 'undefined' && data.user) {
+        localStorage.setItem('reelo_active_user', JSON.stringify(data.user));
       }
 
-      // Fetch or insert profile in Supabase public.profiles
-      const { data: existingProfile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', authData.user.id)
-        .single();
-
-      if (existingProfile) {
-        return { user: existingProfile as Profile, error: null };
-      }
-
-      const newProfile: Profile = {
-        id: authData.user.id,
-        username: username.toLowerCase().trim(),
-        full_name: fullName.trim(),
-        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${username.toLowerCase().trim()}`,
-        banner_url: null,
-        bio: '',
-        location: '',
-        website: '',
-        is_verified: false,
-        followers_count: 0,
-        following_count: 0,
-        posts_count: 0,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      await supabase.from('profiles').insert(newProfile as any);
-
-      return { user: newProfile, error: null };
+      return { user: data.user, error: null };
     } catch (err: any) {
-      if (err?.message === 'Failed to fetch') {
-        return {
-          user: null,
-          error: 'Connection failed: Unable to reach Supabase. Please verify your internet connection and ensure NEXT_PUBLIC_SUPABASE_URL in .env.local is valid.',
-        };
-      }
-      return { user: null, error: err.message || 'An unexpected error occurred during signup.' };
+      return { user: null, error: err.message || 'Unable to connect to local auth service.' };
     }
   },
 
   /**
-   * Authenticate a user with Supabase Auth using email and password.
+   * Sign in to an account stored in the local PC database.
    */
   async signIn(email: string, password: string): Promise<AuthResponse> {
-    if (!isSupabaseConfigured()) {
-      return {
-        user: null,
-        error: 'Supabase credentials missing: Please create .env.local with your NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable Cloud Authentication.',
-      };
-    }
-
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email.trim(),
+          password: password.trim(),
+        }),
       });
 
-      if (error) {
-        return { user: null, error: error.message };
+      const data = await res.json();
+
+      if (!res.ok || data.error) {
+        return { user: null, error: data.error || 'Invalid credentials.' };
       }
 
-      if (!data.user) {
-        return { user: null, error: 'User account not found.' };
+      if (typeof window !== 'undefined' && data.user) {
+        localStorage.setItem('reelo_active_user', JSON.stringify(data.user));
       }
 
-      // Fetch user profile from Supabase PostgreSQL
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', data.user.id)
-        .single();
-
-      if (profileError || !profile) {
-        // Fallback to user metadata if profile row trigger is pending
-        const meta = data.user.user_metadata || {};
-        const fallbackProfile: Profile = {
-          id: data.user.id,
-          username: meta.username || data.user.email?.split('@')[0] || 'user',
-          full_name: meta.full_name || 'REELO Member',
-          avatar_url: meta.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.user.id}`,
-          banner_url: null,
-          bio: '',
-          location: '',
-          website: '',
-          is_verified: false,
-          followers_count: 0,
-          following_count: 0,
-          posts_count: 0,
-          created_at: data.user.created_at,
-          updated_at: data.user.created_at,
-        };
-        return { user: fallbackProfile, error: null };
-      }
-
-      return { user: profile as Profile, error: null };
+      return { user: data.user, error: null };
     } catch (err: any) {
-      if (err?.message === 'Failed to fetch') {
-        return {
-          user: null,
-          error: 'Connection failed: Unable to reach Supabase. Please verify your internet connection and ensure NEXT_PUBLIC_SUPABASE_URL in .env.local is valid.',
-        };
-      }
-      return { user: null, error: err.message || 'Unable to connect to authentication service.' };
+      return { user: null, error: err.message || 'Unable to connect to local auth service.' };
     }
   },
 
   /**
-   * Terminate current session via Supabase Auth.
+   * Sign out and clear active session.
    */
   async signOut(): Promise<void> {
     try {
-      await supabase.auth.signOut();
+      await fetch('/api/auth/logout', { method: 'POST' });
     } catch (err) {
-      console.error('Supabase sign out error:', err);
+      console.warn('Logout fetch warning:', err);
+    }
+
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('reelo_active_user');
     }
   },
 
   /**
-   * Retrieve the currently authenticated user profile from Supabase.
+   * Get the active authenticated profile from local session.
    */
   async getCurrentUser(): Promise<Profile | null> {
-    try {
-      const { data: { user }, error: userError } = await supabase.auth.getUser();
-
-      if (userError || !user) {
-        return null;
+    if (typeof window !== 'undefined') {
+      // Check cached profile first for instant UI response
+      const cached = localStorage.getItem('reelo_active_user');
+      if (cached) {
+        try {
+          return JSON.parse(cached);
+        } catch {
+          localStorage.removeItem('reelo_active_user');
+        }
       }
 
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-
-      if (profile) {
-        return profile as Profile;
+      try {
+        const res = await fetch('/api/auth/me', { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.user) {
+            localStorage.setItem('reelo_active_user', JSON.stringify(data.user));
+            return data.user;
+          }
+        }
+      } catch (err) {
+        console.warn('Failed to fetch active session:', err);
       }
-
-      const meta = user.user_metadata || {};
-      return {
-        id: user.id,
-        username: meta.username || user.email?.split('@')[0] || 'user',
-        full_name: meta.full_name || 'REELO Member',
-        avatar_url: meta.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-        banner_url: null,
-        bio: '',
-        location: '',
-        website: '',
-        is_verified: false,
-        followers_count: 0,
-        following_count: 0,
-        posts_count: 0,
-        created_at: user.created_at,
-        updated_at: user.created_at,
-      };
-    } catch {
-      return null;
     }
+
+    return null;
   },
 };

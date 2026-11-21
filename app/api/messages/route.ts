@@ -1,75 +1,78 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getDb, getServerSessionUserId } from '@/lib/db';
+import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ messages: [] });
-    }
-
+    const db = getDb();
+    const currentUserId = getServerSessionUserId(request);
     const { searchParams } = new URL(request.url);
     const peerId = searchParams.get('peer_id');
 
-    let query = supabase
-      .from('messages')
-      .select('*')
-      .or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`)
-      .order('created_at', { ascending: true });
-
+    let rows: any[] = [];
     if (peerId) {
-      query = query.or(`and(sender_id.eq.${user.id},recipient_id.eq.${peerId}),and(sender_id.eq.${peerId},recipient_id.eq.${user.id})`);
+      rows = db.prepare(`
+        SELECT * FROM messages 
+        WHERE (sender_id = ? AND recipient_id = ?) OR (sender_id = ? AND recipient_id = ?)
+        ORDER BY created_at ASC
+      `).all(currentUserId, peerId, peerId, currentUserId) as any[];
+    } else {
+      rows = db.prepare(`
+        SELECT * FROM messages 
+        WHERE sender_id = ? OR recipient_id = ?
+        ORDER BY created_at ASC
+      `).all(currentUserId, currentUserId) as any[];
     }
 
-    const { data: messages, error } = await query;
+    const messages = rows.map((r) => ({
+      id: r.id,
+      sender_id: r.sender_id,
+      recipient_id: r.recipient_id,
+      content: r.content,
+      is_read: Boolean(r.is_read),
+      created_at: r.created_at,
+    }));
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ messages: messages || [] });
+    return NextResponse.json({ messages });
   } catch (error: any) {
+    console.error('Error fetching messages from local DB:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
+    const db = getDb();
+    const currentUserId = getServerSessionUserId(request);
     const body = await request.json();
     const { recipient_id, content } = body;
 
-    if (!recipient_id || !content) {
-      return NextResponse.json({ error: 'recipient_id and content are required' }, { status: 400 });
+    if (!recipient_id || !content || typeof content !== 'string' || !content.trim()) {
+      return NextResponse.json({ error: 'recipient_id and valid content are required' }, { status: 400 });
     }
 
-    const { data: message, error } = await supabase
-      .from('messages')
-      .insert({
-        sender_id: user.id,
-        recipient_id,
-        content: content.trim(),
-        is_read: false,
-      } as any)
-      .select()
-      .single();
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    db.prepare(`
+      INSERT INTO messages (id, sender_id, recipient_id, content, is_read, created_at)
+      VALUES (?, ?, ?, ?, 0, ?)
+    `).run(id, currentUserId, recipient_id, content.trim(), now);
 
-    return NextResponse.json({ message }, { status: 201 });
+    const newMessage = {
+      id,
+      sender_id: currentUserId,
+      recipient_id,
+      content: content.trim(),
+      is_read: false,
+      created_at: now,
+    };
+
+    return NextResponse.json({ message: newMessage });
   } catch (error: any) {
+    console.error('Error sending message:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

@@ -1,53 +1,58 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getDb, getServerSessionUserId } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const db = getDb();
+    const currentUserId = getServerSessionUserId(request);
 
-    if (authError || !user) {
-      return NextResponse.json({ notifications: [] });
-    }
+    const rows = db.prepare(`
+      SELECT 
+        n.*,
+        p.username as actor_username,
+        p.full_name as actor_name,
+        p.avatar_url as actor_avatar
+      FROM notifications n
+      LEFT JOIN profiles p ON n.actor_id = p.id
+      WHERE n.user_id = ?
+      ORDER BY n.created_at DESC
+    `).all(currentUserId) as any[];
 
-    const { data: notifications, error } = await supabase
-      .from('notifications')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false });
+    const notifications = rows.map((r) => ({
+      id: r.id,
+      user_id: r.user_id,
+      actor_id: r.actor_id,
+      type: r.type,
+      post_id: r.post_id || null,
+      is_read: Boolean(r.is_read),
+      created_at: r.created_at,
+      actor: {
+        id: r.actor_id,
+        username: r.actor_username || 'user',
+        name: r.actor_name || 'REELO User',
+        avatar: r.actor_avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${r.actor_id}`,
+      },
+    }));
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    return NextResponse.json({ notifications: notifications || [] });
+    return NextResponse.json({ notifications });
   } catch (error: any) {
+    console.error('Error fetching notifications:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
-export async function PATCH() {
+export async function PATCH(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const db = getDb();
+    const currentUserId = getServerSessionUserId(request);
 
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
-    const { error } = await (supabase
-      .from('notifications') as any)
-      .update({ is_read: true })
-      .eq('user_id', user.id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    db.prepare('UPDATE notifications SET is_read = 1 WHERE user_id = ?').run(currentUserId);
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error('Error marking notifications read:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

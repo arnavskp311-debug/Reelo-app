@@ -1,42 +1,42 @@
-import { NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { getDb } from '@/lib/db';
+import { Profile } from '@/types';
+import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const db = getDb();
+    const sessionId = request.cookies.get('reelo_session')?.value;
 
-    if (authError || !user) {
+    const targetId = sessionId || DEMO_CURRENT_USER.id;
+    const userRow = db.prepare('SELECT * FROM profiles WHERE id = ?').get(targetId) as any;
+
+    if (!userRow) {
       return NextResponse.json({ user: null });
     }
 
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('id', user.id)
-      .single();
+    const user: Profile = {
+      id: userRow.id,
+      username: userRow.username,
+      full_name: userRow.full_name,
+      avatar_url: userRow.avatar_url,
+      banner_url: userRow.banner_url || null,
+      bio: userRow.bio || '',
+      website: userRow.website || '',
+      location: userRow.location || '',
+      is_verified: Boolean(userRow.is_verified),
+      followers_count: userRow.followers_count || 0,
+      following_count: userRow.following_count || 0,
+      posts_count: userRow.posts_count || 0,
+      created_at: userRow.created_at,
+      updated_at: userRow.updated_at,
+    };
 
-    if (profile) {
-      return NextResponse.json({ user: profile });
-    }
-
-    const meta = user.user_metadata || {};
-    return NextResponse.json({
-      user: {
-        id: user.id,
-        username: meta.username || user.email?.split('@')[0] || 'user',
-        full_name: meta.full_name || 'REELO Member',
-        avatar_url: meta.avatar_url || `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-        followers_count: 0,
-        following_count: 0,
-        posts_count: 0,
-        created_at: user.created_at,
-        updated_at: user.created_at,
-      },
-    });
+    return NextResponse.json({ user });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Internal server error.' }, { status: 500 });
+    console.error('Local PC session error:', error);
+    return NextResponse.json({ user: null });
   }
 }

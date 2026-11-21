@@ -1,128 +1,124 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
-import { PostWithAuthor } from '@/types';
+import { getDb } from '@/lib/db';
+import { PostWithAuthor, Profile } from '@/types';
+import { DEMO_CURRENT_USER } from '@/lib/constants/demo-data';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
+    const db = getDb();
     const { searchParams } = new URL(request.url);
     const filter = searchParams.get('filter') || 'for-you';
-    const limit = parseInt(searchParams.get('limit') || '30', 10);
+    const currentUserId = request.cookies.get('reelo_session')?.value || DEMO_CURRENT_USER.id;
 
-    const { data: { user } } = await supabase.auth.getUser();
+    let query = `
+      SELECT 
+        p.*,
+        u.id as author_id,
+        u.username as author_username,
+        u.full_name as author_full_name,
+        u.avatar_url as author_avatar_url,
+        u.banner_url as author_banner_url,
+        u.bio as author_bio,
+        u.website as author_website,
+        u.location as author_location,
+        u.is_verified as author_is_verified,
+        u.followers_count as author_followers_count,
+        u.following_count as author_following_count,
+        u.posts_count as author_posts_count,
+        u.created_at as author_created_at,
+        u.updated_at as author_updated_at,
+        (SELECT COUNT(*) FROM likes l WHERE l.post_id = p.id AND l.user_id = ?) as user_liked,
+        (SELECT COUNT(*) FROM bookmarks b WHERE b.post_id = p.id AND b.user_id = ?) as user_bookmarked
+      FROM posts p
+      JOIN profiles u ON p.user_id = u.id
+      WHERE p.user_id NOT IN (SELECT blocked_id FROM blocks WHERE blocker_id = ?)
+    `;
 
-    let blockedIds: string[] = [];
-    let followingIds: string[] = [];
-    let savedPostIds: string[] = [];
-    let userLikedIds = new Set<string>();
-    let userBookmarkedIds = new Set<string>();
-
-    if (user) {
-      const [blocksRes, followsRes, bookmarksRes, likesRes] = await Promise.all([
-        supabase.from('blocks').select('blocked_id').eq('blocker_id', user.id),
-        supabase.from('follows').select('following_id').eq('follower_id', user.id),
-        supabase.from('bookmarks').select('post_id').eq('user_id', user.id),
-        supabase.from('likes').select('post_id').eq('user_id', user.id),
-      ]);
-
-      if (blocksRes.data) blockedIds = blocksRes.data.map((b: any) => b.blocked_id);
-      if (followsRes.data) followingIds = followsRes.data.map((f: any) => f.following_id);
-      if (bookmarksRes.data) {
-        savedPostIds = bookmarksRes.data.map((b: any) => b.post_id);
-        userBookmarkedIds = new Set(savedPostIds);
-      }
-      if (likesRes.data) {
-        userLikedIds = new Set(likesRes.data.map((l: any) => l.post_id));
-      }
-    }
-
-    let query = supabase
-      .from('posts')
-      .select(`
-        *,
-        author:profiles!posts_user_id_fkey(*)
-      `)
-      .limit(limit);
-
-    if (blockedIds.length > 0) {
-      query = query.not('user_id', 'in', `(${blockedIds.join(',')})`);
-    }
+    const params: any[] = [currentUserId, currentUserId, currentUserId];
 
     if (filter === 'reels') {
-      query = query.in('media_type', ['video', 'reel']);
-    } else if (filter === 'following' && user) {
-      if (followingIds.length > 0) {
-        query = query.in('user_id', followingIds);
-      } else {
-        return NextResponse.json({ posts: [] });
-      }
-    } else if (filter === 'saved' && user) {
-      if (savedPostIds.length > 0) {
-        query = query.in('id', savedPostIds);
-      } else {
-        return NextResponse.json({ posts: [] });
-      }
+      query += ` AND (p.media_type = 'reel' OR (p.media_urls != '[]' AND p.media_urls IS NOT NULL))`;
+    } else if (filter === 'saved') {
+      query += ` AND p.id IN (SELECT post_id FROM bookmarks WHERE user_id = ?)`;
+      params.push(currentUserId);
+    } else if (filter === 'following') {
+      query += ` AND p.user_id IN (SELECT following_id FROM follows WHERE follower_id = ?)`;
+      params.push(currentUserId);
     }
 
     if (filter === 'trending') {
-      query = query.order('likes_count', { ascending: false }).order('created_at', { ascending: false });
+      query += ` ORDER BY p.likes_count DESC, p.created_at DESC`;
     } else {
-      query = query.order('created_at', { ascending: false });
+      query += ` ORDER BY p.is_pinned DESC, p.created_at DESC`;
     }
 
-    const { data: postsData, error } = await query;
+    const rows = db.prepare(query).all(...params) as any[];
 
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    const posts: PostWithAuthor[] = rows.map((r) => {
+      let mediaUrls: string[] = [];
+      try {
+        mediaUrls = JSON.parse(r.media_urls || '[]');
+      } catch {
+        mediaUrls = [];
+      }
 
-    const posts: PostWithAuthor[] = (postsData || []).map((post: any) => ({
-      id: post.id,
-      user_id: post.user_id,
-      content: post.content,
-      media_urls: post.media_urls || [],
-      media_type: post.media_type || 'none',
-      likes_count: post.likes_count || 0,
-      comments_count: post.comments_count || 0,
-      reposts_count: post.reposts_count || 0,
-      community_id: post.community_id || null,
-      tags: post.tags || [],
-      is_pinned: Boolean(post.is_pinned),
-      created_at: post.created_at,
-      updated_at: post.updated_at,
-      author: post.author || {
-        id: post.user_id,
-        username: 'creator',
-        full_name: 'REELO Member',
-        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${post.user_id}`,
-        is_verified: false,
-        followers_count: 0,
-        following_count: 0,
-        posts_count: 0,
-        created_at: post.created_at,
-        updated_at: post.created_at,
-      },
-      user_has_liked: userLikedIds.has(post.id),
-      user_has_bookmarked: userBookmarkedIds.has(post.id),
-    }));
+      let tags: string[] = [];
+      try {
+        tags = JSON.parse(r.tags || '[]');
+      } catch {
+        tags = [];
+      }
+
+      const author: Profile = {
+        id: r.author_id,
+        username: r.author_username,
+        full_name: r.author_full_name,
+        avatar_url: r.author_avatar_url,
+        banner_url: r.author_banner_url || null,
+        bio: r.author_bio || '',
+        website: r.author_website || '',
+        location: r.author_location || '',
+        is_verified: Boolean(r.author_is_verified),
+        followers_count: r.author_followers_count || 0,
+        following_count: r.author_following_count || 0,
+        posts_count: r.author_posts_count || 0,
+        created_at: r.author_created_at,
+        updated_at: r.author_updated_at,
+      };
+
+      return {
+        id: r.id,
+        user_id: r.user_id,
+        content: r.content,
+        media_urls: mediaUrls,
+        media_type: r.media_type,
+        likes_count: r.likes_count,
+        comments_count: r.comments_count,
+        reposts_count: r.reposts_count,
+        community_id: r.community_id,
+        tags,
+        is_pinned: Boolean(r.is_pinned),
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+        author,
+        user_has_liked: Boolean(r.user_liked),
+        user_has_bookmarked: Boolean(r.user_bookmarked),
+      };
+    });
 
     return NextResponse.json({ posts });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    console.error('Local PC posts query error:', error);
+    return NextResponse.json({ error: error.message || 'Internal database error.' }, { status: 500 });
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required to post.' }, { status: 401 });
-    }
-
+    const db = getDb();
+    const currentUserId = request.cookies.get('reelo_session')?.value || DEMO_CURRENT_USER.id;
     const body = await request.json();
     const { content, mediaUrls, mediaType, tags, communityId } = body;
 
@@ -130,46 +126,74 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Post content cannot be empty.' }, { status: 400 });
     }
 
-    const newPostPayload = {
-      user_id: user.id,
+    const postId = `p_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
+
+    const insertStmt = db.prepare(`
+      INSERT INTO posts (
+        id, user_id, content, media_urls, media_type, likes_count, comments_count,
+        reposts_count, community_id, tags, is_pinned, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 0, 0, 0, ?, ?, 0, ?, ?)
+    `);
+
+    insertStmt.run(
+      postId,
+      currentUserId,
+      content.trim(),
+      JSON.stringify(mediaUrls || []),
+      mediaType || 'none',
+      communityId || null,
+      JSON.stringify(tags || []),
+      now,
+      now
+    );
+
+    // Update user post count
+    db.prepare('UPDATE profiles SET posts_count = posts_count + 1 WHERE id = ?').run(currentUserId);
+
+    // Fetch author profile
+    const authorRow = db.prepare('SELECT * FROM profiles WHERE id = ?').get(currentUserId) as any;
+    const author: Profile = authorRow
+      ? {
+          id: authorRow.id,
+          username: authorRow.username,
+          full_name: authorRow.full_name,
+          avatar_url: authorRow.avatar_url,
+          banner_url: authorRow.banner_url || null,
+          bio: authorRow.bio || '',
+          website: authorRow.website || '',
+          location: authorRow.location || '',
+          is_verified: Boolean(authorRow.is_verified),
+          followers_count: authorRow.followers_count || 0,
+          following_count: authorRow.following_count || 0,
+          posts_count: authorRow.posts_count || 0,
+          created_at: authorRow.created_at,
+          updated_at: authorRow.updated_at,
+        }
+      : DEMO_CURRENT_USER;
+
+    const newPost: PostWithAuthor = {
+      id: postId,
+      user_id: currentUserId,
       content: content.trim(),
       media_urls: mediaUrls || [],
       media_type: mediaType || 'none',
-      tags: tags || [],
-      community_id: communityId || null,
       likes_count: 0,
       comments_count: 0,
       reposts_count: 0,
+      community_id: communityId || null,
+      tags: tags || [],
       is_pinned: false,
-    };
-
-    const { data: newPost, error: insertError } = await supabase
-      .from('posts')
-      .insert(newPostPayload as any)
-      .select(`
-        *,
-        author:profiles!posts_user_id_fkey(*)
-      `)
-      .single();
-
-    if (insertError) {
-      return NextResponse.json({ error: insertError.message }, { status: 500 });
-    }
-
-    const postWithAuthor: PostWithAuthor = {
-      ...(newPost as any),
-      author: (newPost as any)?.author || {
-        id: user.id,
-        username: 'you',
-        full_name: 'You',
-        avatar_url: `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`,
-      },
+      created_at: now,
+      updated_at: now,
+      author,
       user_has_liked: false,
       user_has_bookmarked: false,
     };
 
-    return NextResponse.json({ post: postWithAuthor }, { status: 201 });
+    return NextResponse.json({ post: newPost }, { status: 201 });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    console.error('Local PC post create error:', error);
+    return NextResponse.json({ error: error.message || 'Internal database error.' }, { status: 500 });
   }
 }

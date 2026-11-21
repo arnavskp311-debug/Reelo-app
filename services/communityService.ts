@@ -1,23 +1,18 @@
 import { Community } from '@/types';
-import { supabase } from '@/lib/supabase/client';
 
 export const communityService = {
   /**
-   * Fetch all communities from Supabase PostgreSQL.
+   * Fetch all communities from local PC database API.
    */
   async getCommunities(): Promise<Community[]> {
     try {
-      const { data, error } = await supabase
-        .from('communities')
-        .select('*')
-        .order('members_count', { ascending: false });
-
-      if (error || !data) {
-        console.error('Error fetching communities from Supabase:', error);
+      const res = await fetch('/api/communities', { cache: 'no-store' });
+      if (!res.ok) {
+        console.error('Error fetching communities from local PC API:', res.statusText);
         return [];
       }
-
-      return data as Community[];
+      const data = await res.json();
+      return (data.communities || []) as Community[];
     } catch (err) {
       console.error('Error in communityService.getCommunities:', err);
       return [];
@@ -25,21 +20,12 @@ export const communityService = {
   },
 
   /**
-   * Fetch a single community by its unique slug from Supabase.
+   * Fetch a single community by its unique slug from local PC database API.
    */
   async getCommunityBySlug(slug: string): Promise<Community | null> {
     try {
-      const { data, error } = await supabase
-        .from('communities')
-        .select('*')
-        .eq('slug', slug)
-        .single();
-
-      if (error || !data) {
-        return null;
-      }
-
-      return data as Community;
+      const communities = await this.getCommunities();
+      return communities.find((c) => c.slug === slug) || null;
     } catch (err) {
       console.error('Error in communityService.getCommunityBySlug:', err);
       return null;

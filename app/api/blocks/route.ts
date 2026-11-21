@@ -1,81 +1,60 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getDb, getServerSessionUserId } from '@/lib/db';
+import crypto from 'crypto';
 
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    const db = getDb();
+    const currentUserId = getServerSessionUserId(request);
 
-    if (authError || !user) {
-      return NextResponse.json({ blocked_ids: [] });
-    }
+    const rows = db
+      .prepare('SELECT blocked_id FROM blocks WHERE blocker_id = ?')
+      .all(currentUserId) as any[];
 
-    const { data: blocks, error } = await supabase
-      .from('blocks')
-      .select('blocked_id')
-      .eq('blocker_id', user.id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-
-    const blockedIds = (blocks || []).map((b: any) => b.blocked_id);
+    const blockedIds = rows.map((r) => r.blocked_id);
     return NextResponse.json({ blocked_ids: blockedIds });
   } catch (error: any) {
+    console.error('Error fetching blocks:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
+    const db = getDb();
+    const currentUserId = getServerSessionUserId(req);
     const body = await req.json();
-    const { blocked_id } = body;
+    const { blocked_id, reason } = body;
 
     if (!blocked_id) {
       return NextResponse.json({ error: 'Missing blocked_id' }, { status: 400 });
     }
 
-    if (blocked_id === user.id) {
+    if (blocked_id === currentUserId) {
       return NextResponse.json({ error: 'Cannot block yourself' }, { status: 400 });
     }
 
-    const { data, error } = await supabase
-      .from('blocks')
-      .insert({
-        blocker_id: user.id,
-        blocked_id,
-      } as any)
-      .select()
-      .single();
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
 
-    if (error && error.code !== '23505') {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    db.prepare(`
+      INSERT OR IGNORE INTO blocks (id, blocker_id, blocked_id, reason, created_at)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(id, currentUserId, blocked_id, reason || null, now);
 
-    return NextResponse.json({ success: true, block: data });
+    return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error('Error creating block:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
 
 export async function DELETE(req: NextRequest) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
+    const db = getDb();
+    const currentUserId = getServerSessionUserId(req);
     const body = await req.json();
     const { blocked_id } = body;
 
@@ -83,18 +62,14 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: 'Missing blocked_id' }, { status: 400 });
     }
 
-    const { error } = await supabase
-      .from('blocks')
-      .delete()
-      .eq('blocker_id', user.id)
-      .eq('blocked_id', blocked_id);
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
-    }
+    db.prepare('DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?').run(
+      currentUserId,
+      blocked_id
+    );
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
+    console.error('Error unblocking user:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createServerSupabaseClient } from '@/lib/supabase/server';
+import { getDb, getServerSessionUserId } from '@/lib/db';
+import { Profile } from '@/types';
 
 export const dynamic = 'force-dynamic';
 
@@ -8,21 +9,37 @@ export async function GET(
   { params }: { params: { username: string } }
 ) {
   try {
-    const supabase = createServerSupabaseClient();
+    const db = getDb();
     const username = params.username.toLowerCase().trim();
 
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('*')
-      .eq('username', username)
-      .single();
+    const row = db
+      .prepare('SELECT * FROM profiles WHERE lower(username) = lower(?)')
+      .get(username) as any;
 
-    if (error || !profile) {
+    if (!row) {
       return NextResponse.json({ error: 'User not found' }, { status: 404 });
     }
 
+    const profile: Profile = {
+      id: row.id,
+      username: row.username,
+      full_name: row.full_name,
+      avatar_url: row.avatar_url,
+      banner_url: row.banner_url || null,
+      bio: row.bio || '',
+      website: row.website || '',
+      location: row.location || '',
+      is_verified: Boolean(row.is_verified),
+      followers_count: row.followers_count || 0,
+      following_count: row.following_count || 0,
+      posts_count: row.posts_count || 0,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+    };
+
     return NextResponse.json({ profile });
   } catch (error: any) {
+    console.error('Error fetching user profile:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
@@ -32,37 +49,61 @@ export async function PATCH(
   { params }: { params: { username: string } }
 ) {
   try {
-    const supabase = createServerSupabaseClient();
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-    if (authError || !user) {
-      return NextResponse.json({ error: 'Authentication required' }, { status: 401 });
-    }
-
+    const db = getDb();
+    const currentUserId = getServerSessionUserId(request);
     const body = await request.json();
     const { full_name, bio, location, website, avatar_url, banner_url } = body;
 
-    const { data: updated, error } = await (supabase
-      .from('profiles') as any)
-      .update({
-        ...(full_name && { full_name: full_name.trim() }),
-        ...(bio !== undefined && { bio }),
-        ...(location !== undefined && { location }),
-        ...(website !== undefined && { website }),
-        ...(avatar_url && { avatar_url }),
-        ...(banner_url && { banner_url }),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', user.id)
-      .select()
-      .single();
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    const existing = db.prepare('SELECT * FROM profiles WHERE id = ?').get(currentUserId) as any;
+    if (!existing) {
+      return NextResponse.json({ error: 'User profile not found' }, { status: 404 });
     }
 
-    return NextResponse.json({ profile: updated });
+    const updatedFullName = full_name ? full_name.trim() : existing.full_name;
+    const updatedBio = bio !== undefined ? bio : existing.bio;
+    const updatedLocation = location !== undefined ? location : existing.location;
+    const updatedWebsite = website !== undefined ? website : existing.website;
+    const updatedAvatar = avatar_url || existing.avatar_url;
+    const updatedBanner = banner_url !== undefined ? banner_url : existing.banner_url;
+    const now = new Date().toISOString();
+
+    db.prepare(`
+      UPDATE profiles
+      SET full_name = ?, bio = ?, location = ?, website = ?, avatar_url = ?, banner_url = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      updatedFullName,
+      updatedBio,
+      updatedLocation,
+      updatedWebsite,
+      updatedAvatar,
+      updatedBanner,
+      now,
+      currentUserId
+    );
+
+    const updatedRow = db.prepare('SELECT * FROM profiles WHERE id = ?').get(currentUserId) as any;
+
+    const updatedProfile: Profile = {
+      id: updatedRow.id,
+      username: updatedRow.username,
+      full_name: updatedRow.full_name,
+      avatar_url: updatedRow.avatar_url,
+      banner_url: updatedRow.banner_url || null,
+      bio: updatedRow.bio || '',
+      website: updatedRow.website || '',
+      location: updatedRow.location || '',
+      is_verified: Boolean(updatedRow.is_verified),
+      followers_count: updatedRow.followers_count || 0,
+      following_count: updatedRow.following_count || 0,
+      posts_count: updatedRow.posts_count || 0,
+      created_at: updatedRow.created_at,
+      updated_at: updatedRow.updated_at,
+    };
+
+    return NextResponse.json({ profile: updatedProfile });
   } catch (error: any) {
+    console.error('Error updating user profile:', error);
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
   }
 }
