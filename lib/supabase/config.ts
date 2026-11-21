@@ -5,6 +5,8 @@ export const isSupabaseConfigured = (): boolean => {
     url && 
     anonKey && 
     !url.includes('your-project-id') && 
-    !anonKey.includes('your-anon-key')
+    !anonKey.includes('your-anon-key') &&
+    !url.includes('placeholder.supabase.co') &&
+    !anonKey.includes('placeholder-anon-key')
   );
 };

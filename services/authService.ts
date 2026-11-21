@@ -1,5 +1,6 @@
 import { Profile } from '@/types';
 import { supabase } from '@/lib/supabase/client';
+import { isSupabaseConfigured } from '@/lib/supabase/config';
 
 export interface AuthResponse {
   user: Profile | null;
@@ -11,6 +12,13 @@ export const authService = {
    * Register a new user with Supabase Auth and initialize their cloud profile.
    */
   async signUp(email: string, password: string, username: string, fullName: string): Promise<AuthResponse> {
+    if (!isSupabaseConfigured()) {
+      return {
+        user: null,
+        error: 'Supabase credentials missing: Please create .env.local with your NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable Cloud Authentication.',
+      };
+    }
+
     try {
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
@@ -64,6 +72,12 @@ export const authService = {
 
       return { user: newProfile, error: null };
     } catch (err: any) {
+      if (err?.message === 'Failed to fetch') {
+        return {
+          user: null,
+          error: 'Connection failed: Unable to reach Supabase. Please verify your internet connection and ensure NEXT_PUBLIC_SUPABASE_URL in .env.local is valid.',
+        };
+      }
       return { user: null, error: err.message || 'An unexpected error occurred during signup.' };
     }
   },
@@ -72,6 +86,13 @@ export const authService = {
    * Authenticate a user with Supabase Auth using email and password.
    */
   async signIn(email: string, password: string): Promise<AuthResponse> {
+    if (!isSupabaseConfigured()) {
+      return {
+        user: null,
+        error: 'Supabase credentials missing: Please create .env.local with your NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to enable Cloud Authentication.',
+      };
+    }
+
     try {
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
@@ -117,6 +138,12 @@ export const authService = {
 
       return { user: profile as Profile, error: null };
     } catch (err: any) {
+      if (err?.message === 'Failed to fetch') {
+        return {
+          user: null,
+          error: 'Connection failed: Unable to reach Supabase. Please verify your internet connection and ensure NEXT_PUBLIC_SUPABASE_URL in .env.local is valid.',
+        };
+      }
       return { user: null, error: err.message || 'Unable to connect to authentication service.' };
     }
   },
